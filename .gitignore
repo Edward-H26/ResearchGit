@@ -1,0 +1,145 @@
+# =====================================================
+# Dependencies
+# =====================================================
+node_modules/
+/.pnp
+.pnp.*
+.yarn/cache
+.yarn/install-state.gz
+.yarn/build-state.yml
+.yarn/unplugged
+
+# Other package-manager lockfiles (this project uses pnpm 10)
+package-lock.json
+yarn.lock
+bun.lockb
+
+# =====================================================
+# Next.js / build output
+# =====================================================
+/.next/
+/out/
+/build/
+/dist/
+next-env.d.ts
+
+# Incremental build / typecheck artifacts
+*.tsbuildinfo
+
+# =====================================================
+# Tooling caches
+# =====================================================
+.turbo/
+.pnpm-store/
+.eslintcache
+.stylelintcache
+.parcel-cache
+.swc/
+
+# =====================================================
+# Test output
+# =====================================================
+/coverage/
+/playwright-report/
+/test-results/
+*.lcov
+
+# =====================================================
+# Local environment (NEVER commit secrets)
+# =====================================================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+# Keep the template tracked
+!.env.example
+
+# =====================================================
+# Logs
+# =====================================================
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-debug.log
+
+# =====================================================
+# Process artifacts
+# =====================================================
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# =====================================================
+# Editor / OS junk
+# =====================================================
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+.history/
+*.sublime-project
+*.sublime-workspace
+.zed/
+
+# =====================================================
+# Claude Code / AI tooling session files (host-local)
+# =====================================================
+.claude/
+/codex-runs/
+/.codex/
+
+# =====================================================
+# Local-only dev artifacts
+# =====================================================
+*.tgz
+*.tar.gz
+*.pem
+/screenshots/
+/.screenshots/
+/scripts/output/
+/scripts/cache/
+
+# =====================================================
+# Local databases (Docker mounts named volumes, not in repo)
+# =====================================================
+*.sqlite
+*.sqlite-journal
+*.db
+/data/
+/local-data/
+/neo4j-data/
+/neo4j-logs/
+
+# =====================================================
+# Hosting-platform artifacts
+# =====================================================
+/.vercel
+.render/
+
+# =====================================================
+# Vendored catalog data (16 MB) — re-create with `pnpm vendor-catalog`
+# =====================================================
+# The ResearchGalaxy cluster JSONs are large data files. They are vendored
+# locally for development and `pnpm vendor-catalog` re-creates them from
+# $RESEARCHGALAXY_PATH (defaults to ~/Desktop/ProjectResearchGala).
+# For production deploy on Render: either commit the catalog from a clean
+# working tree before push, host it on S3/Git LFS, or run vendor-catalog
+# with a remote source as a build step.
+/public/catalog/cluster_details/
+/public/catalog/all_venues_cluster_themes.json
+
+# =====================================================
+# Notes
+# =====================================================
+# `plans/` is intentionally tracked — it contains the architecture
+# source-of-truth doc. If a particular plan file is session-specific,
+# ignore it by exact name rather than the whole directory.

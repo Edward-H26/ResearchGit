@@ -1,0 +1,3 @@
+export const TOTAL_CLUSTERS = 20;
+export const DEFAULT_CLUSTERS_PER_DECK = 10;
+export const DEFAULT_PAPERS_PER_CLUSTER_PROMPT = 30;

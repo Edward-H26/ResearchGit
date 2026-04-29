@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+@theme {
+  --color-intent-add: var(--color-emerald-300);
+  --color-intent-delete: var(--color-red-300);
+  --color-intent-merge: var(--color-violet-300);
+}
+
+:root {
+  --background: 0 0% 96%;
+  --foreground: 240 10% 3.9%;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+/* Tailwind v4 removed `cursor: pointer` from button defaults (matches the
+   native browser default of `cursor: default`). Restore the affordance so
+   every clickable button in the app looks clickable. `@layer base` keeps the
+   specificity below Tailwind utilities, so explicit classes like
+   `cursor-grab` on the canvas stickies continue to win. The `:not(:disabled)`
+   exclusion preserves disabled-state cursor handling. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+}

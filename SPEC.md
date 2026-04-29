@@ -1,7 +1,7 @@
 # ResearchGit — Specification
 
 > Project name: **ResearchGit**
-> Path: `/Users/edwardhu/Desktop/ResearchGit/`
+> Path: `/Users/<you>/Desktop/ResearchGit/`
 > Author: Edward Hu
 > Date: 2026-04-27
 > Status: Approved spec, source of truth for implementation
@@ -306,8 +306,8 @@ Postgres + jsonb would work but the relationship-heavy queries become awkward jo
 ### 5.1 Catalog vendoring
 
 **Source paths (copied once):**
-- `/Users/edwardhu/Desktop/ProjectResearchGala/ResearchGalaxy-/research-galaxy-next demo/public/assets/cluster_details/cluster_*.json`
-- `/Users/edwardhu/Desktop/ProjectResearchGala/ResearchGalaxy-/demo_data/merged/all_venues_cluster_themes.json`
+- `/Users/<you>/Desktop/ProjectResearchGala/ResearchGalaxy-/research-galaxy-next demo/public/assets/cluster_details/cluster_*.json`
+- `/Users/<you>/Desktop/ProjectResearchGala/ResearchGalaxy-/demo_data/merged/all_venues_cluster_themes.json`
 
 **Destination:** `ResearchGit/public/catalog/`
 
@@ -686,7 +686,7 @@ A natural sequence to maximize feedback and minimize rework. Each phase is a ver
 
 After approval, the implementation phase will:
 
-1. `cd /Users/edwardhu/Desktop/ResearchGit/`
+1. `cd /Users/<you>/Desktop/ResearchGit/`
 2. Scaffold the Next.js + TypeScript project with the §3.3 layout.
 3. Vendor and sanitize the cluster catalog from ResearchGalaxy (§5.1).
 4. Build phase by phase per §12.
