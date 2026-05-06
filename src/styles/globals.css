@@ -1,33 +1,68 @@
 @import "tailwindcss";
 
+/* ===== ResearchGit V2 — Atomic Ideation visual tokens ===== */
+
 @theme {
-  --color-intent-add: var(--color-emerald-300);
-  --color-intent-delete: var(--color-red-300);
-  --color-intent-merge: var(--color-violet-300);
+  --color-bg: #f4efe7;
+  --color-bg-elev: #ffffff;
+  --color-ink: #1b1b1b;
+  --color-ink-2: #4f4a41;
+  --color-muted: #8a847a;
+  --color-line: #e5dfd3;
+  --color-amber: #c69e57;
+  --color-amber-soft: #f4e6c5;
+  --color-amber-ink: #6f5210;
+
+  /* User color signature palette (Atomic Ideation) */
+  --color-u-rose: #ee9d8a;
+  --color-u-amber: #f3c46a;
+  --color-u-citron: #d6d758;
+  --color-u-mint: #79c79c;
+  --color-u-sky: #7fb6e0;
+  --color-u-iris: #b08fcd;
+
+  /* Status badges */
+  --color-status-draft: #7e7972;
+  --color-status-open: #4f8ec5;
 }
 
 :root {
-  --background: 0 0% 96%;
-  --foreground: 240 10% 3.9%;
+  --background: 36 30% 93%;
+  --foreground: 0 0% 11%;
+  --f-serif: "Lora", "Playfair Display", Georgia, "Times New Roman", serif;
+  --f-hand: "Caveat", "Comic Sans MS", cursive;
+  --f-mono: "Geist Mono", "JetBrains Mono", "SFMono-Regular", monospace;
+  --sh-1: 0 1px 2px rgba(20, 14, 0, 0.05), 0 2px 6px rgba(20, 14, 0, 0.04);
+  --sh-3: 0 4px 12px rgba(20, 14, 0, 0.08), 0 12px 32px rgba(20, 14, 0, 0.08);
 }
 
 html,
 body {
   height: 100%;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-feature-settings: "kern", "liga";
 }
 
-/* Tailwind v4 removed `cursor: pointer` from button defaults (matches the
-   native browser default of `cursor: default`). Restore the affordance so
-   every clickable button in the app looks clickable. `@layer base` keeps the
-   specificity below Tailwind utilities, so explicit classes like
-   `cursor-grab` on the canvas stickies continue to win. The `:not(:disabled)`
-   exclusion preserves disabled-state cursor handling. */
+.font-serif {
+  font-family: var(--f-serif);
+}
+.font-hand {
+  font-family: var(--f-hand);
+  font-style: italic;
+}
+.font-mono-tiny {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+/* Tailwind v4 removed `cursor: pointer` from button defaults. Restore it. */
 @layer base {
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]) {
     cursor: pointer;
   }
-
   button:disabled,
   [aria-disabled="true"] {
     cursor: not-allowed;

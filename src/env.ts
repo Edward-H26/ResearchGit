@@ -7,10 +7,10 @@ export const env = createEnv({
     NEO4J_URI: z.string().min(1).default("bolt://localhost:7687"),
     NEO4J_USER: z.string().min(1).default("neo4j"),
     NEO4J_PASSWORD: z.string().min(1).default("researchgit-dev"),
-    AUTH_SECRET: z.string().min(1).default("dev-only-replace-with-openssl-rand-base64-32"),
+    AUTH_SECRET: z.string().min(1).optional(),
     AUTH_URL: z.string().url().default("http://localhost:3000"),
-    GOOGLE_CLIENT_ID: z.string().min(1).default("placeholder-google-client-id"),
-    GOOGLE_CLIENT_SECRET: z.string().min(1).default("placeholder-google-client-secret"),
+    GOOGLE_CLIENT_ID: z.string().min(1).optional(),
+    GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
     ADMIN_EMAILS: z
       .string()
       .default("")
@@ -20,9 +20,8 @@ export const env = createEnv({
           .map((e) => e.trim().toLowerCase())
           .filter(Boolean),
       ),
-    OPENAI_API_KEY: z.string().min(1).default("placeholder-openai-key"),
-    OPENAI_MODEL: z.string().min(1).default("placeholder-openai-model"),
-    LIVEBLOCKS_SECRET_KEY: z.string().min(1).default("placeholder-liveblocks-key"),
+    OPENAI_API_KEY: z.string().min(1).optional(),
+    OPENAI_MODEL: z.string().min(1).optional(),
   },
   client: {},
   runtimeEnv: {
@@ -37,7 +36,6 @@ export const env = createEnv({
     ADMIN_EMAILS: process.env.ADMIN_EMAILS,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     OPENAI_MODEL: process.env.OPENAI_MODEL,
-    LIVEBLOCKS_SECRET_KEY: process.env.LIVEBLOCKS_SECRET_KEY,
   },
   skipValidation: process.env.SKIP_ENV_VALIDATION === "true",
   emptyStringAsUndefined: true,

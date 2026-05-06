@@ -37,7 +37,6 @@ export function updateStickyNote(
 export function buildStickyNote(input: {
   authorHandle: string;
   authorUserId: string;
-  intent: StickyNote["intent"];
   point: { x: number; y: number };
   random?: () => number;
 }): StickyNote {
@@ -49,7 +48,8 @@ export function buildStickyNote(input: {
     y: Math.round(input.point.y - NOTE_CREATE_OFFSET.y),
     width: NOTE_DEFAULT_WIDTH,
     height: NOTE_DEFAULT_HEIGHT,
-    intent: input.intent,
+    themeIndex: null,
+    themeColorToken: null,
     authorUserId: input.authorUserId,
     authorHandle: input.authorHandle,
     rotation: createStickyRotation(random),

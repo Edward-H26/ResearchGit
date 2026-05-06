@@ -1,10 +1,7 @@
 import { env } from "@/env";
 
-const PLACEHOLDER_PREFIXES = ["placeholder-", "dev-only-"];
-
 export function isConfiguredSecret(value: string | null | undefined): value is string {
-  if (!value) return false;
-  return !PLACEHOLDER_PREFIXES.some((prefix) => value.startsWith(prefix));
+  return Boolean(value);
 }
 
 export function isGoogleAuthConfigured(): boolean {

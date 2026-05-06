@@ -1,8 +1,5 @@
 import { z } from "zod";
 
-export const StickyIntentSchema = z.enum(["add", "delete", "merge"]);
-export type StickyIntent = z.infer<typeof StickyIntentSchema>;
-
 export const StickyNoteSchema = z.object({
   id: z.string(),
   text: z.string(),
@@ -10,7 +7,8 @@ export const StickyNoteSchema = z.object({
   y: z.number(),
   width: z.number().min(90).max(360),
   height: z.number().min(80).max(320),
-  intent: StickyIntentSchema,
+  themeIndex: z.number().int().nullable(),
+  themeColorToken: z.string().nullable(),
   authorUserId: z.string(),
   authorHandle: z.string(),
   rotation: z.number(),

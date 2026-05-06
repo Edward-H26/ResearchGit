@@ -14,12 +14,11 @@ describe("TelemetryEventKindSchema", () => {
       "sticky.deleted",
       "sticky.moved",
       "sticky.text_edited",
-      "sticky.intent_changed",
-      "ai.revise.triggered",
-      "ai.revise.accepted",
-      "ai.revise.rejected",
+      "themes.suggested",
+      "ideas.generated",
+      "ideas.published",
       "session.idle",
-      "deck.viewed",
+      "dashboard.viewed",
       "idea.viewed",
     ] as const;
     for (const kind of kinds) {
@@ -88,7 +87,7 @@ describe("TelemetryBatchSchema", () => {
 
   it("accepts a 1-event batch", () => {
     const result = TelemetryBatchSchema.safeParse({
-      events: [{ kind: "deck.viewed", ts: "2026-04-29T01:00:00.000Z" }],
+      events: [{ kind: "dashboard.viewed", ts: "2026-04-29T01:00:00.000Z" }],
     });
     expect(result.success).toBe(true);
   });

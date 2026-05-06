@@ -1,18 +1,26 @@
 import { env } from "@/env";
-import { isAdminEmail, isGoogleAuthConfigured } from "@/lib/auth/config";
-import { mergeUserNode } from "@/server/user-service";
+import { isAdminEmail, isConfiguredSecret, isGoogleAuthConfigured } from "@/lib/auth/config";
+import { getUserSummary, mergeUserNode } from "@/server/user-service";
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 
+const googleClientId = env.GOOGLE_CLIENT_ID;
+const googleClientSecret = env.GOOGLE_CLIENT_SECRET;
+const authSecret = env.AUTH_SECRET;
+const providers =
+  isConfiguredSecret(googleClientId) && isConfiguredSecret(googleClientSecret)
+    ? [
+        Google({
+          clientId: googleClientId,
+          clientSecret: googleClientSecret,
+          authorization: { params: { prompt: "consent", access_type: "offline" } },
+        }),
+      ]
+    : [];
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  secret: env.AUTH_SECRET,
-  providers: [
-    Google({
-      clientId: env.GOOGLE_CLIENT_ID,
-      clientSecret: env.GOOGLE_CLIENT_SECRET,
-      authorization: { params: { prompt: "consent", access_type: "offline" } },
-    }),
-  ],
+  ...(authSecret ? { secret: authSecret } : {}),
+  providers,
   session: { strategy: "jwt" },
   pages: {
     signIn: "/",
@@ -38,12 +46,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         });
         token.id = merged.id;
         token.googleId = profile.sub;
+        token.matchedAuthorName = merged.matchedAuthorName;
       }
       return token;
     },
     async session({ session, token }) {
       if (token.id && typeof token.id === "string") {
         session.user.id = token.id;
+        const user = await getUserSummary(token.id);
+        session.user.matchedAuthorName = user?.matchedAuthorName ?? null;
+        if (user?.matchedAuthorName) {
+          session.user.name = user.matchedAuthorName;
+        }
       }
       return session;
     },

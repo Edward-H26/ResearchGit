@@ -7,12 +7,11 @@ export const TelemetryEventKindSchema = z.enum([
   "sticky.deleted",
   "sticky.moved",
   "sticky.text_edited",
-  "sticky.intent_changed",
-  "ai.revise.triggered",
-  "ai.revise.accepted",
-  "ai.revise.rejected",
+  "themes.suggested",
+  "ideas.generated",
+  "ideas.published",
   "session.idle",
-  "deck.viewed",
+  "dashboard.viewed",
   "idea.viewed",
 ]);
 

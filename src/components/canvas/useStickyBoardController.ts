@@ -11,14 +11,13 @@ import {
   NOTE_MIN_WIDTH,
   PAN_DEFAULT,
   ZOOM_DEFAULT,
-  ZOOM_STEP_BUTTON,
   ZOOM_STEP_WHEEL,
   buildStickyNote,
   clampZoom,
   createFallbackBoardPoint,
 } from "@/lib/canvas";
-import type { StickyIntent, StickyNote } from "@/lib/canvas/schema";
-import type { BoardMode, CanvasUser, DragState } from "@/lib/canvas/types";
+import type { StickyNote } from "@/lib/canvas/schema";
+import type { BoardMode, CanvasUser, DragState, ResizeCorner } from "@/lib/canvas/types";
 import { emitEvent } from "@/lib/telemetry";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -26,13 +25,12 @@ type StickyBoardStorage = {
   notes: ReadonlyArray<StickyNote>;
   addNote: (note: StickyNote) => void;
   patchNote: (id: string, patch: Partial<StickyNote>) => void;
-  deleteNote: (id: string) => void;
-  clearNotes: () => void;
 };
 
 export type UseStickyBoardControllerInput = {
   currentUser: CanvasUser;
   storage: StickyBoardStorage;
+  readOnly?: boolean;
 };
 
 function clampNoteDimension(value: number, min: number, max: number, fallback: number): number {
@@ -41,15 +39,15 @@ function clampNoteDimension(value: number, min: number, max: number, fallback: n
 }
 
 export function useStickyBoardController(input: UseStickyBoardControllerInput) {
-  const { currentUser, storage } = input;
+  const { currentUser, readOnly = false, storage } = input;
   const boardRef = useRef<HTMLDivElement | null>(null);
   const notes = storage.notes;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mode, setMode] = useState<BoardMode>("select");
   const [drag, setDrag] = useState<DragState>(null);
+  const dragRef = useRef<DragState>(null);
   const [zoom, setZoom] = useState(ZOOM_DEFAULT);
   const [pan, setPan] = useState<{ x: number; y: number }>({ ...PAN_DEFAULT });
-  const [currentIntent, setCurrentIntent] = useState<StickyIntent>("add");
   const [search, setSearch] = useState("");
   const lastDraggedNoteIdRef = useRef<string | null>(null);
 
@@ -66,16 +64,12 @@ export function useStickyBoardController(input: UseStickyBoardControllerInput) {
     }
   }, [notes, selectedId]);
 
-  const selectedNote = notes.find((note) => note.id === selectedId) ?? null;
-
   const visibleNotes = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return notes;
     return notes.filter(
       (note) =>
-        note.text.toLowerCase().includes(query) ||
-        note.authorHandle.toLowerCase().includes(query) ||
-        note.intent.toLowerCase().includes(query),
+        note.text.toLowerCase().includes(query) || note.authorHandle.toLowerCase().includes(query),
     );
   }, [notes, search]);
 
@@ -89,63 +83,55 @@ export function useStickyBoardController(input: UseStickyBoardControllerInput) {
   }
 
   function addNote(clientX?: number, clientY?: number) {
+    if (readOnly) return;
     const point =
       typeof clientX === "number" && typeof clientY === "number"
         ? toBoardPoint(clientX, clientY)
         : createFallbackBoardPoint();
     const next = buildStickyNote({
       point,
-      intent: currentIntent,
       authorUserId: currentUser.id,
       authorHandle: currentUser.handle,
     });
     storage.addNote(next);
     setSelectedId(next.id);
-    emitEvent({ kind: "sticky.created", stickyId: next.id, payload: { intent: next.intent } });
+    emitEvent({ kind: "sticky.created", stickyId: next.id });
   }
 
   function patchNote(id: string, patch: Partial<StickyNote>, eventKind?: "sticky.text_edited") {
+    if (readOnly) return;
     storage.patchNote(id, patch);
     if (eventKind) {
       emitEvent({ kind: eventKind, stickyId: id });
     }
   }
 
-  function setIntent(intent: StickyIntent) {
-    setCurrentIntent(intent);
-    if (!selectedNote || selectedNote.intent === intent) return;
-    patchNote(selectedNote.id, { intent });
-    emitEvent({ kind: "sticky.intent_changed", stickyId: selectedNote.id, payload: { intent } });
+  function focusNote(id: string) {
+    const note = notes.find((candidate) => candidate.id === id);
+    setSelectedId(id);
+    const rect = boardRef.current?.getBoundingClientRect();
+    if (!note || !rect) return;
+    setPan({
+      x: Math.round(rect.width / 2 - (note.x + note.width / 2) * zoom),
+      y: Math.round(rect.height / 2 - (note.y + note.height / 2) * zoom),
+    });
   }
 
-  function updateSelectedSize(field: "width" | "height", rawValue: number) {
-    if (!selectedNote) return;
-    const value =
-      field === "width"
-        ? clampNoteDimension(rawValue, NOTE_MIN_WIDTH, NOTE_MAX_WIDTH, NOTE_DEFAULT_WIDTH)
-        : clampNoteDimension(rawValue, NOTE_MIN_HEIGHT, NOTE_MAX_HEIGHT, NOTE_DEFAULT_HEIGHT);
-    patchNote(selectedNote.id, { [field]: value });
+  function setActiveDrag(nextDrag: DragState) {
+    dragRef.current = nextDrag;
+    setDrag(nextDrag);
   }
 
-  function deleteSelected() {
-    if (!selectedId) return;
-    storage.deleteNote(selectedId);
-    emitEvent({ kind: "sticky.deleted", stickyId: selectedId });
-    setSelectedId(null);
-  }
-
-  function clearBoard() {
-    const deletedIds = notes.map((note) => note.id);
-    storage.clearNotes();
-    setSelectedId(null);
-    for (const stickyId of deletedIds) {
-      emitEvent({ kind: "sticky.deleted", stickyId });
-    }
-  }
-
-  function resetView() {
-    setZoom(ZOOM_DEFAULT);
-    setPan({ ...PAN_DEFAULT });
+  function beginPanDrag(event: React.PointerEvent<HTMLElement>) {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setActiveDrag({
+      type: "pan",
+      startX: event.clientX,
+      startY: event.clientY,
+      panX: pan.x,
+      panY: pan.y,
+    });
   }
 
   function onBoardPointerDown(event: React.PointerEvent<HTMLDivElement>) {
@@ -154,28 +140,34 @@ export function useStickyBoardController(input: UseStickyBoardControllerInput) {
     if (!isBoardSurface) return;
     setSelectedId(null);
 
-    if (mode === "pan" || event.button === 1 || event.altKey) {
-      setDrag({
-        type: "pan",
-        startX: event.clientX,
-        startY: event.clientY,
-        panX: pan.x,
-        panY: pan.y,
-      });
+    if (!readOnly && event.detail === 2 && event.button === 0) {
+      addNote(event.clientX, event.clientY);
       return;
     }
 
-    if (event.detail === 2) addNote(event.clientX, event.clientY);
+    if (event.button === 0 || event.button === 1) {
+      beginPanDrag(event);
+    }
   }
 
   function beginNoteDrag(event: React.PointerEvent<HTMLElement>, note: StickyNote) {
-    if (mode !== "select") return;
     const target = event.target as HTMLElement;
+    if (event.detail > 1) return;
     if (target.closest("textarea") || target.closest("[data-toolbar]")) return;
+    if (readOnly) {
+      setSelectedId(note.id);
+      return;
+    }
+    if (mode === "pan" || event.button === 1 || event.altKey) {
+      beginPanDrag(event);
+      return;
+    }
+    if (mode !== "select") return;
+    event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     const point = toBoardPoint(event.clientX, event.clientY);
     setSelectedId(note.id);
-    setDrag({
+    setActiveDrag({
       type: "note",
       id: note.id,
       offsetX: point.x - note.x,
@@ -183,20 +175,78 @@ export function useStickyBoardController(input: UseStickyBoardControllerInput) {
     });
   }
 
+  function beginNoteResize(
+    event: React.PointerEvent<HTMLElement>,
+    note: StickyNote,
+    corner: ResizeCorner = "se",
+  ) {
+    if (readOnly) return;
+    if (mode !== "select") return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setSelectedId(note.id);
+    setActiveDrag({
+      type: "resize",
+      id: note.id,
+      corner,
+      startX: event.clientX,
+      startY: event.clientY,
+      x: note.x,
+      y: note.y,
+      width: note.width,
+      height: note.height,
+    });
+  }
+
   function onPointerMove(event: React.PointerEvent<HTMLDivElement>) {
-    if (!drag) return;
-    if (drag.type === "pan") {
+    const activeDrag = dragRef.current;
+    if (!activeDrag) return;
+    if (activeDrag.type === "pan") {
       setPan({
-        x: drag.panX + event.clientX - drag.startX,
-        y: drag.panY + event.clientY - drag.startY,
+        x: activeDrag.panX + event.clientX - activeDrag.startX,
+        y: activeDrag.panY + event.clientY - activeDrag.startY,
+      });
+      return;
+    }
+    if (activeDrag.type === "resize") {
+      const deltaX = (event.clientX - activeDrag.startX) / zoom;
+      const deltaY = (event.clientY - activeDrag.startY) / zoom;
+      const rawWidth = activeDrag.corner.endsWith("e")
+        ? activeDrag.width + deltaX
+        : activeDrag.width - deltaX;
+      const rawHeight = activeDrag.corner.startsWith("s")
+        ? activeDrag.height + deltaY
+        : activeDrag.height - deltaY;
+      const width = clampNoteDimension(
+        rawWidth,
+        NOTE_MIN_WIDTH,
+        NOTE_MAX_WIDTH,
+        NOTE_DEFAULT_WIDTH,
+      );
+      const height = clampNoteDimension(
+        rawHeight,
+        NOTE_MIN_HEIGHT,
+        NOTE_MAX_HEIGHT,
+        NOTE_DEFAULT_HEIGHT,
+      );
+      patchNote(activeDrag.id, {
+        x: activeDrag.corner.endsWith("w")
+          ? Math.round(activeDrag.x + activeDrag.width - width)
+          : activeDrag.x,
+        y: activeDrag.corner.startsWith("n")
+          ? Math.round(activeDrag.y + activeDrag.height - height)
+          : activeDrag.y,
+        width,
+        height,
       });
       return;
     }
     const point = toBoardPoint(event.clientX, event.clientY);
-    lastDraggedNoteIdRef.current = drag.id;
-    patchNote(drag.id, {
-      x: Math.round(point.x - drag.offsetX),
-      y: Math.round(point.y - drag.offsetY),
+    lastDraggedNoteIdRef.current = activeDrag.id;
+    patchNote(activeDrag.id, {
+      x: Math.round(point.x - activeDrag.offsetX),
+      y: Math.round(point.y - activeDrag.offsetY),
     });
   }
 
@@ -205,12 +255,18 @@ export function useStickyBoardController(input: UseStickyBoardControllerInput) {
       emitEvent({ kind: "sticky.moved", stickyId: lastDraggedNoteIdRef.current });
       lastDraggedNoteIdRef.current = null;
     }
-    setDrag(null);
+    setActiveDrag(null);
   }
 
   function onWheel(event: React.WheelEvent<HTMLDivElement>) {
-    if (!event.ctrlKey && !event.metaKey) return;
     event.preventDefault();
+    if (!event.ctrlKey && !event.metaKey) {
+      setPan((current) => ({
+        x: current.x - event.deltaX,
+        y: current.y - event.deltaY,
+      }));
+      return;
+    }
     const delta = event.deltaY > 0 ? -ZOOM_STEP_WHEEL : ZOOM_STEP_WHEEL;
     setZoom((value) => clampZoom(value + delta));
   }
@@ -220,30 +276,23 @@ export function useStickyBoardController(input: UseStickyBoardControllerInput) {
     notes,
     visibleNotes,
     selectedId,
-    selectedNote,
     mode,
     drag,
     zoom,
     pan,
-    currentIntent,
     search,
     boardSize: { width: BOARD_WIDTH, height: BOARD_HEIGHT },
     setMode,
     setSearch,
     setSelectedId,
-    setIntent,
     addNote,
     patchNote,
-    updateSelectedSize,
-    deleteSelected,
-    clearBoard,
-    resetView,
+    focusNote,
     onBoardPointerDown,
     beginNoteDrag,
+    beginNoteResize,
     onPointerMove,
     onPointerUp,
     onWheel,
-    zoomOut: () => setZoom((value) => clampZoom(value - ZOOM_STEP_BUTTON)),
-    zoomIn: () => setZoom((value) => clampZoom(value + ZOOM_STEP_BUTTON)),
   };
 }

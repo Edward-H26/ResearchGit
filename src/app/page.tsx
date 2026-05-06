@@ -1,71 +1,42 @@
-import { auth, isGoogleAuthConfigured, signIn, signOut } from "@/lib/auth";
+import { isGoogleAuthConfigured, signIn } from "@/lib/auth";
 import Link from "next/link";
 
-export default async function Home() {
-  const session = await auth();
-  const user = session?.user ?? null;
-  const googleAuthReady = isGoogleAuthConfigured();
+const AUTHOR_LOOKUP_PATH = "/login";
+const CONTINUE_BUTTON_CLASSES =
+  "inline-flex w-fit items-center justify-center rounded-full bg-neutral-950 px-6 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800";
 
+async function continueWithGoogle() {
+  "use server";
+
+  await signIn("google", { redirectTo: AUTHOR_LOOKUP_PATH });
+}
+
+export default function Home() {
   return (
-    <main className="flex min-h-screen items-center justify-center p-8">
-      <div className="w-full max-w-md text-center">
-        <h1 className="text-4xl font-semibold tracking-tight">ResearchGit</h1>
-        <p className="mt-3 text-neutral-500">Co-design probe for crowdsourced research ideation.</p>
-
-        {user ? (
-          <div className="mt-8 space-y-4">
-            <p className="text-sm text-neutral-600">
-              Signed in as{" "}
-              <span className="font-medium text-neutral-900">{user.name ?? user.email}</span>
-            </p>
-            <div className="flex flex-col items-center gap-3">
-              <Link
-                href="/deck"
-                className="inline-flex items-center justify-center rounded-2xl bg-neutral-950 px-6 py-3 text-sm font-medium text-white transition hover:bg-neutral-800"
-              >
-                Open the deck
-              </Link>
-              <form
-                action={async () => {
-                  "use server";
-                  await signOut({ redirectTo: "/" });
-                }}
-              >
-                <button
-                  type="submit"
-                  className="text-xs text-neutral-500 underline-offset-4 hover:text-neutral-900 hover:underline"
-                >
-                  Sign out
-                </button>
-              </form>
-            </div>
-          </div>
+    <main className="min-h-screen bg-[#f4efe7] px-5 py-8 text-neutral-950 sm:px-6">
+      <section className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-7xl flex-col justify-center">
+        <p className="font-mono-tiny uppercase tracking-[0.22em] text-neutral-950">
+          ResearchGit V2
+        </p>
+        <h1 className="mt-8 max-w-6xl font-serif text-5xl font-medium leading-[0.95] tracking-normal text-neutral-950 sm:text-7xl lg:text-8xl">
+          Sign in as a CHI 2026 author.
+        </h1>
+        <p className="mt-10 max-w-5xl text-lg leading-relaxed text-neutral-950 sm:text-2xl">
+          Match your author name to the CHI 2026 program, confirm the paper record, then continue
+          into recommendations, drafting, marketplace feedback, and saved versions.
+        </p>
+        {isGoogleAuthConfigured() ? (
+          <form action={continueWithGoogle} className="mt-10 w-fit">
+            <button type="submit" className={CONTINUE_BUTTON_CLASSES}>
+              Continue with Google
+            </button>
+          </form>
         ) : (
-          <div className="mt-8 space-y-3">
-            {googleAuthReady ? (
-              <form
-                action={async () => {
-                  "use server";
-                  await signIn("google", { redirectTo: "/deck" });
-                }}
-              >
-                <button
-                  type="submit"
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-neutral-950 px-6 py-3 text-sm font-medium text-white transition hover:bg-neutral-800"
-                >
-                  <span aria-hidden="true">G</span>
-                  <span>Sign in with Google</span>
-                </button>
-              </form>
-            ) : (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                Google auth is not configured. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to
-                enable sign-in.
-              </div>
-            )}
-          </div>
+          <Link href={AUTHOR_LOOKUP_PATH} className={`mt-10 ${CONTINUE_BUTTON_CLASSES}`}>
+            Continue with Google
+          </Link>
         )}
-      </div>
+      </section>
     </main>
   );
 }

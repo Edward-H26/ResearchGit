@@ -1,21 +1,30 @@
 import { z } from "zod";
 
-export const IdeaProposalSchema = z.object({
-  title: z.string().min(8).max(100),
-  researchQuestion: z.string().min(20).max(220),
-  rationale: z.string().min(40).max(400),
-  proposalMarkdown: z.string().min(800).max(2000),
-  anchorPaperIds: z
-    .array(z.string().min(1))
-    .length(3)
-    .refine((arr) => new Set(arr).size === 3, "anchorPaperIds must be 3 distinct ids"),
+export const GeneratedIdeaSchema = z.object({
+  title: z.string().min(1).max(160),
+  hypothesis: z.string().min(1).max(240),
+  methodSketch: z.string().min(1),
+  novelty: z.array(z.string().min(1)).min(2).max(3),
+  groundingCitations: z.array(z.string().min(1)).min(1),
 });
 
-export type IdeaProposal = z.infer<typeof IdeaProposalSchema>;
-
-export const RevisedIdeaSchema = z.object({
-  revisedMarkdown: z.string().min(1),
-  changelog: z.string().min(1).max(300),
+export const GeneratedIdeasSchema = z.object({
+  ideas: z.array(GeneratedIdeaSchema).min(2).max(3),
 });
 
-export type RevisedIdea = z.infer<typeof RevisedIdeaSchema>;
+export const ThemeClusterSchema = z.object({
+  label: z.string().min(1).max(60),
+  noteIndexes: z.array(z.number().int().nonnegative()).min(1),
+});
+
+export const ThemeClustersSchema = z.object({
+  themes: z.array(ThemeClusterSchema).min(1).max(3),
+});
+
+export const SynthesizedIdeaSchema = z.object({
+  title: z.string().min(1).max(160),
+  hypothesis: z.string().min(1).max(240),
+  methodology: z.string().min(1),
+  novelty: z.array(z.string().min(1)).min(2).max(4),
+  citations: z.array(z.string().min(1)).min(1),
+});

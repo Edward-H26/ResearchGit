@@ -4,7 +4,6 @@ export const BOARD_HEIGHT = 1250;
 export const ZOOM_MIN = 0.45;
 export const ZOOM_MAX = 1.6;
 export const ZOOM_DEFAULT = 0.82;
-export const ZOOM_STEP_BUTTON = 0.1;
 export const ZOOM_STEP_WHEEL = 0.08;
 
 export const PAN_DEFAULT: { x: number; y: number } = { x: 60, y: 70 };
