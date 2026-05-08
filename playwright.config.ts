@@ -19,13 +19,15 @@ export default defineConfig({
   ],
   webServer: process.env.CI
     ? {
-        command: "pnpm build && pnpm start",
+        command:
+          "RESEARCHGIT_E2E_AUTHOR_BYPASS=1 pnpm build && RESEARCHGIT_E2E_AUTHOR_BYPASS=1 pnpm start",
         url: "http://localhost:3000",
         reuseExistingServer: false,
         timeout: 120_000,
       }
     : {
-        command: "pnpm build && pnpm start",
+        command:
+          "RESEARCHGIT_E2E_AUTHOR_BYPASS=1 pnpm build && RESEARCHGIT_E2E_AUTHOR_BYPASS=1 pnpm start",
         url: "http://localhost:3000",
         reuseExistingServer: true,
         timeout: 120_000,

@@ -94,6 +94,7 @@ desktop.ini
 # Claude Code / AI tooling session files (host-local)
 # =====================================================
 .claude/
+.playwright-mcp/
 /codex-runs/
 /.codex/
 

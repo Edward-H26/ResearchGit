@@ -1,6 +1,6 @@
 import { IdeaGenerationClient } from "@/components/v2/IdeaGenerationClient";
 import { auth } from "@/lib/auth";
-import { getAuthorByName } from "@/lib/papers/catalog";
+import { resolvePageAuthor } from "@/lib/auth/author";
 
 type IdeaGenerationPageProps = {
   searchParams?: Promise<{
@@ -18,9 +18,7 @@ function asArray(value: string | string[] | undefined): string[] {
 export default async function IdeaGenerationPage({ searchParams }: IdeaGenerationPageProps) {
   const params = (await searchParams) ?? {};
   const session = await auth();
-  const author =
-    (params.author ? getAuthorByName(params.author) : null) ??
-    (session?.user?.name ? getAuthorByName(session.user.name) : null);
+  const author = resolvePageAuthor(session, params.author);
 
   return (
     <IdeaGenerationClient

@@ -29,6 +29,10 @@ function getMemoryState(): IdeaStoreState {
   return globalScope.__researchgitIdeaStore;
 }
 
+function getCachedMemoryState(): IdeaStoreState | null {
+  return globalScope.__researchgitIdeaStore ?? null;
+}
+
 function saveMemoryState(state: IdeaStoreState): IdeaStoreState {
   globalScope.__researchgitIdeaStore = state;
   return state;
@@ -82,6 +86,8 @@ async function ensureNeo4jState(): Promise<IdeaStoreState> {
 
 export async function getIdeaStoreState(): Promise<IdeaStoreState> {
   if (globalScope.__researchgitIdeaStoreNeo4jDisabled) return getMemoryState();
+  const cachedState = getCachedMemoryState();
+  if (cachedState) return cachedState;
 
   try {
     const state = await ensureNeo4jState();

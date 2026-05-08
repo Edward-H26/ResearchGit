@@ -13,7 +13,7 @@ export const NOTE_DEFAULT_HEIGHT = 145;
 export const NOTE_MIN_WIDTH = 90;
 export const NOTE_MAX_WIDTH = 360;
 export const NOTE_MIN_HEIGHT = 80;
-export const NOTE_MAX_HEIGHT = 320;
+export const NOTE_MAX_HEIGHT = 360;
 
 export const NOTE_FALLBACK_ANCHOR = { x: 575, y: 430 } as const;
 export const NOTE_FALLBACK_VARIANCE = { x: 120, y: 100 } as const;

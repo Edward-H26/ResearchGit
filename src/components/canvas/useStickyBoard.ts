@@ -17,10 +17,15 @@ export type { UseStickyBoardInput };
 
 function notesSignature(notes: ReadonlyArray<StickyNote>): string {
   return notes
-    .map(
-      (note) =>
-        `${note.id}:${note.text}:${note.x}:${note.y}:${note.width}:${note.height}:${note.themeIndex}:${note.themeColorToken}:${note.authorUserId}:${note.authorHandle}:${note.rotation}`,
-    )
+    .map((note) => {
+      const versions = (note.versions ?? [])
+        .map(
+          (version) =>
+            `${version.id}:${version.text}:${version.label}:${version.source}:${version.authorHandle}:${version.createdAt}`,
+        )
+        .join(",");
+      return `${note.id}:${note.text}:${note.x}:${note.y}:${note.width}:${note.height}:${note.themeIndex}:${note.themeColorToken}:${note.authorUserId}:${note.authorHandle}:${note.rotation}:${versions}`;
+    })
     .join("|");
 }
 

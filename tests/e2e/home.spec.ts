@@ -1,19 +1,41 @@
+import AxeBuilder from "@axe-core/playwright";
 import { type APIRequestContext, type Page, expect, test } from "@playwright/test";
 
+const E2E_AUTHOR_NAMES = ["Yun Huang", "Yiren Liu", "Hyanghee Park", "Ziyi Zhang"] as const;
 const createdIdeaOwners = new Map<string, string>();
 
 async function cleanupE2EWorkflowIdeas(request: APIRequestContext) {
-  const response = await request.get("/api/ideas/store");
-  expect(response.ok()).toBe(true);
-  const state = (await response.json()) as {
-    ideas: Array<{ id: string; ownerName: string; title: string; cardId: string }>;
-  };
-  const e2eIdeas = state.ideas.filter(
-    (idea) =>
-      idea.title.startsWith("E2E workflow draft") || idea.cardId.startsWith("e2e-workflow-"),
-  );
+  const ideasById = new Map<
+    string,
+    { id: string; ownerName: string; title: string; cardId: string }
+  >();
+  for (const authorName of E2E_AUTHOR_NAMES) {
+    const authorSlug = authorName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "");
+    const clearTopicsResponse = await request.post("/api/ideas/store", {
+      data: {
+        action: "clearJoinedTopics",
+        payload: { normalizedAuthorName: authorSlug },
+      },
+    });
+    expect(clearTopicsResponse.ok()).toBe(true);
 
-  for (const idea of e2eIdeas) {
+    const params = new URLSearchParams({ author: authorName });
+    const response = await request.get(`/api/ideas/store?${params.toString()}`);
+    expect(response.ok()).toBe(true);
+    const state = (await response.json()) as {
+      ideas: Array<{ id: string; ownerName: string; title: string; cardId: string }>;
+    };
+    for (const idea of state.ideas) {
+      if (idea.title.startsWith("E2E workflow draft") || idea.cardId.startsWith("e2e-workflow-")) {
+        ideasById.set(idea.id, idea);
+      }
+    }
+  }
+
+  for (const idea of ideasById.values()) {
     const cleanupResponse = await request.post("/api/ideas/store", {
       data: {
         action: "deleteIdea",
@@ -94,7 +116,8 @@ async function createUniqueDraft(page: Page, authorName = "Yun Huang") {
 
 async function createUniqueOpenIdea(page: Page, authorName = "Yun Huang") {
   const ideaId = await createUniqueDraft(page, authorName);
-  const storeResponse = await page.request.get("/api/ideas/store");
+  const params = new URLSearchParams({ author: authorName });
+  const storeResponse = await page.request.get(`/api/ideas/store?${params.toString()}`);
   expect(storeResponse.ok()).toBe(true);
   const storeState = (await storeResponse.json()) as {
     ideas: Array<{
@@ -185,18 +208,89 @@ test.describe("v2 author workflow", () => {
     await expect(page.getByText(/no chi 2026 author paper is linked/i)).toBeVisible();
   });
 
+  test("idea store API rejects unmatched authors and invalid enums", async ({ request }) => {
+    const storeResponse = await request.get("/api/ideas/store");
+    expect(storeResponse.ok()).toBe(true);
+    const storeState = (await storeResponse.json()) as {
+      ideas: Array<{ id: string; status: string }>;
+    };
+    const openIdea = storeState.ideas.find((idea) => idea.status === "open");
+    if (!openIdea) throw new Error("open idea seed was not found");
+
+    const createResponse = await request.post("/api/ideas/store", {
+      data: {
+        action: "createIdeaFromCard",
+        payload: {
+          authorName: "Not A CHI Author",
+          card: {
+            id: "api-rejected-card",
+            title: "API rejected card",
+            hypothesis: "This should not be created.",
+            methodSketch: "Invalid author method.",
+            novelty: ["Invalid author"],
+            groundingPaperIds: ["p1-room-122-61"],
+          },
+        },
+      },
+    });
+    expect(createResponse.status()).toBe(401);
+
+    const topicResponse = await request.post("/api/ideas/store", {
+      data: {
+        action: "createTopicIdeaFromCard",
+        payload: {
+          actorName: "Yun Huang",
+          card: {
+            id: "topic-not-a-real-topic",
+            title: "Invalid topic",
+            hypothesis: "This should not become a topic.",
+            methodSketch: "Invalid topic method.",
+            novelty: ["Invalid topic"],
+            groundingPaperIds: [],
+          },
+        },
+      },
+    });
+    expect(topicResponse.ok()).toBe(true);
+    expect(((await topicResponse.json()) as { idea: unknown }).idea).toBeNull();
+
+    const voteResponse = await request.post("/api/ideas/store", {
+      data: {
+        action: "toggleIdeaUpvote",
+        payload: { ideaId: openIdea.id, authorName: "Not A CHI Author" },
+      },
+    });
+    expect(voteResponse.status()).toBe(401);
+
+    const commentResponse = await request.post("/api/ideas/store", {
+      data: {
+        action: "addCommentToIdea",
+        payload: {
+          ideaId: openIdea.id,
+          authorName: "Yiren Liu",
+          type: "invalid_type",
+          body: "Malformed comment",
+        },
+      },
+    });
+    expect(commentResponse.ok()).toBe(true);
+    expect(((await commentResponse.json()) as { idea: unknown }).idea).toBeNull();
+  });
+
   test("dashboard setup tutorial covers the major workflow", async ({ page }) => {
+    test.setTimeout(60_000);
     await page.goto("/dashboard?author=Yun%20Huang&onboard=1");
     await expect(page.getByRole("heading", { name: "ResearchGit workflow" })).toBeVisible();
     await expectTutorialDialogCentered(page);
 
     const tutorialSteps = [
-      "Account and author match",
-      "Publications",
-      "Recommendations",
-      "Idea generation",
-      "Draft canvas",
-      "Marketplace feedback",
+      "Match your CHI identity",
+      "Scan your CHI papers",
+      "Generate a draft route",
+      "Explore broader sessions",
+      "Join a shared topic canvas",
+      "Build with sticky notes",
+      "Comment and synthesize",
     ];
 
     for (const [index, tutorialStep] of tutorialSteps.entries()) {
@@ -204,9 +298,13 @@ test.describe("v2 author workflow", () => {
         page.getByText(`Step ${index + 1} of ${tutorialSteps.length}`, { exact: true }),
       ).toBeVisible();
       await expect(page.getByRole("heading", { name: tutorialStep, exact: true })).toBeVisible();
+      await expect(page.getByText("Where", { exact: true })).toBeVisible();
+      await expect(page.getByText("Use when", { exact: true })).toBeVisible();
+      await expect(page.getByText("Do this", { exact: true })).toBeVisible();
+      await expect(page.getByText("Next", { exact: true })).toBeVisible();
 
       if (index < tutorialSteps.length - 1) {
-        await page.getByRole("button", { name: "Next feature" }).click();
+        await page.getByRole("button", { name: "Next step" }).click();
       }
     }
 
@@ -236,60 +334,137 @@ test.describe("v2 author workflow", () => {
     await page.route("**/api/ideas/store", (route) => route.abort());
     await page.goto("/dashboard?author=Yun%20Huang&onboard=1");
     await expect(page.getByRole("heading", { name: "ResearchGit workflow" })).toBeVisible();
-    await expect(page.getByText("Step 1 of 6", { exact: true })).toBeVisible();
+    await expect(page.getByText("Step 1 of 7", { exact: true })).toBeVisible();
   });
 
-  test("dashboard topics use an explicit generate more control", async ({ page }) => {
-    const authorKey = "yun-huang";
-    const storeResponse = await page.request.get("/api/ideas/store");
-    expect(storeResponse.ok()).toBe(true);
-    const storeState = (await storeResponse.json()) as {
-      topicRecommendationCountByAuthor?: Record<string, number>;
-    };
-    const previousTopicCount = storeState.topicRecommendationCountByAuthor?.[authorKey];
+  test("dashboard topics use session cards and keyword generation", async ({ page }) => {
+    await page.goto("/dashboard?author=Ziyi%20Zhang");
+    await dismissTutorialIfPresent(page);
+    await expect(page.getByRole("heading", { name: "Broader topics" })).toBeVisible();
 
-    try {
-      const resetResponse = await page.request.post("/api/ideas/store", {
-        data: {
-          action: "saveTopicRecommendationCount",
-          payload: {
-            normalizedAuthorName: authorKey,
-            visibleTopicCount: 3,
-          },
-        },
-      });
-      expect(resetResponse.ok()).toBe(true);
-
-      await page.goto("/dashboard?author=Yun%20Huang");
-      await expect(page.getByRole("heading", { name: "Topics and collaborators" })).toBeVisible();
-
-      const topicSection = page.locator("[data-topic-section]");
-      const topicCards = topicSection.locator("[data-topic-card]");
-      const topicList = topicSection.locator("[data-topic-list]");
-      await expect.poll(async () => topicCards.count()).toBe(3);
-      await expect(topicSection.getByText(/\d+ of \d+/)).toHaveCount(0);
-      await page.getByRole("button", { name: "Generate more" }).click();
-      await expect.poll(async () => topicCards.count()).toBe(6);
-      await expect
-        .poll(async () =>
-          topicList.evaluate((element) => element.scrollHeight > element.clientHeight),
-        )
-        .toBe(true);
-
-      await page.reload();
-      await expect(page.getByRole("heading", { name: "Topics and collaborators" })).toBeVisible();
-      await expect.poll(async () => topicCards.count()).toBeGreaterThanOrEqual(6);
-    } finally {
-      await page.request.post("/api/ideas/store", {
-        data: {
-          action: "saveTopicRecommendationCount",
-          payload: {
-            normalizedAuthorName: authorKey,
-            visibleTopicCount: previousTopicCount ?? 3,
-          },
-        },
-      });
+    const topicSection = page.locator("[data-topic-section]");
+    const topicCards = topicSection.locator("[data-topic-card]");
+    await expect.poll(async () => topicCards.count()).toBe(1);
+    await expect(topicCards.first()).toContainText("Session: P1 - Room 122");
+    await expect(topicCards.first()).toContainText("AI in Practice");
+    await expect(page.getByLabel("Keywords for similar topics")).toHaveCount(0);
+    const topicSectionBox = await topicSection.boundingBox();
+    const initialGenerateBox = await page
+      .getByRole("button", { name: "Generate more topics" })
+      .boundingBox();
+    expect(topicSectionBox).not.toBeNull();
+    expect(initialGenerateBox).not.toBeNull();
+    if (!topicSectionBox || !initialGenerateBox) {
+      throw new Error("topic section or generate button was not measurable");
     }
+    expect(initialGenerateBox.x).toBeGreaterThan(topicSectionBox.x + topicSectionBox.width / 2);
+    await page.getByRole("button", { name: "Generate more topics" }).click();
+    await expect(page.getByLabel("Keywords for similar topics")).toBeVisible();
+    await page.getByLabel("Keywords for similar topics").fill("latency timing agents");
+    await page.getByRole("button", { name: "Generate more topics" }).click();
+    await expect(page.locator("[data-generated-topic-review]")).toBeVisible();
+    await expect(page.getByText(/Generated \d+ session topic/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Confirm and join" })).toBeDisabled();
+    await page.getByLabel("Cancel generated topics").click({ position: { x: 5, y: 5 } });
+    await expect(page.locator("[data-generated-topic-review]")).toHaveCount(0);
+    await expect.poll(async () => topicCards.count()).toBe(1);
+    await page.getByRole("button", { name: "Generate more topics" }).click();
+    await expect(page.locator("[data-generated-topic-review]")).toBeVisible();
+    await page.locator("[data-generated-topic-option]").first().getByRole("button").click();
+    await expect(page.locator("[data-selected-generated-topics]")).toBeVisible();
+    await page.getByRole("button", { name: "Confirm and join" }).click();
+    await expect(page.locator("[data-generated-topic-review]")).toHaveCount(0);
+    await expect.poll(async () => topicCards.count()).toBe(2);
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test("dashboard idea workspace adapts to tablet widths", async ({ page }) => {
+    await page.setViewportSize({ width: 866, height: 717 });
+    await page.goto("/dashboard?author=Ziyi%20Zhang");
+    await dismissTutorialIfPresent(page);
+    const workspace = page.locator("[data-idea-actions]");
+    await expect(workspace).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+    const workspaceBox = await workspace.boundingBox();
+    const summaryBoxes = await workspace
+      .locator("[data-idea-summary-stat]")
+      .evaluateAll((elements) =>
+        elements.map((element) => {
+          const rect = element.getBoundingClientRect();
+          return { top: rect.top };
+        }),
+      );
+    const actionBoxes = await workspace.locator("a, button").evaluateAll((elements) =>
+      elements.map((element) => {
+        const rect = element.getBoundingClientRect();
+        return { left: rect.left, right: rect.right };
+      }),
+    );
+    expect(workspaceBox).not.toBeNull();
+    if (!workspaceBox) throw new Error("idea workspace was not measurable");
+    expect(summaryBoxes).toHaveLength(3);
+    expect(Math.max(...summaryBoxes.map((box) => box.top))).toBeLessThanOrEqual(
+      Math.min(...summaryBoxes.map((box) => box.top)) + 2,
+    );
+    await expect(
+      workspace.getByRole("link", { name: "From all my papers at CHI 2026" }),
+    ).toBeVisible();
+    for (const box of actionBoxes) {
+      expect(box.left).toBeGreaterThanOrEqual(workspaceBox.x - 1);
+      expect(box.right).toBeLessThanOrEqual(workspaceBox.x + workspaceBox.width + 1);
+    }
+  });
+
+  test("broader topic cards open an inline dashboard workspace", async ({ page }) => {
+    await page.goto("/dashboard?author=Yun%20Huang");
+    await dismissTutorialIfPresent(page);
+    await expect(page.getByRole("heading", { name: "Broader topics" })).toBeVisible();
+    const firstTopic = page.locator("[data-topic-card]").first();
+    await expect(firstTopic).toBeVisible();
+    const topicTitle = await firstTopic.locator("h3").innerText();
+    const dashboardUrl = page.url();
+
+    await firstTopic.getByRole("button", { name: "Join topic" }).click();
+
+    await expect(page).toHaveURL(dashboardUrl);
+    await expect(firstTopic.getByRole("button", { name: "Joined" })).toHaveCount(0);
+    await expect(firstTopic.getByRole("button", { name: "Join topic" })).toHaveCount(0);
+    const inlineWorkspace = firstTopic.locator("[data-inline-topic-workspace]");
+    await expect(inlineWorkspace).toBeVisible();
+    await expect(inlineWorkspace.getByRole("heading", { name: topicTitle })).toBeVisible();
+    await expect(inlineWorkspace.getByText("Session paper browser")).toBeVisible();
+    await expect(inlineWorkspace.getByRole("link", { name: "Open paper" })).toHaveCount(0);
+    await inlineWorkspace.getByRole("button", { name: /session paper browser/i }).click();
+    await expect(inlineWorkspace.getByRole("heading", { name: "Comment composer" })).toHaveCount(0);
+    await expect(inlineWorkspace.getByRole("heading", { name: "Comment threads" })).toHaveCount(0);
+    await expect(inlineWorkspace.getByRole("link", { name: "Program record" })).toHaveCount(0);
+    const firstPaperRow = inlineWorkspace.locator("[data-topic-paper-row]").first();
+    const firstPaperTitle = await firstPaperRow.locator("h5").innerText();
+    await firstPaperRow.getByRole("link", { name: "Open paper" }).click();
+    await expect(page).toHaveURL(/\/topics\/[^/]+\/papers\//);
+    await expect(
+      page.locator("header").first().getByRole("heading", { level: 1, name: firstPaperTitle }),
+    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Sticky note area" })).toBeVisible();
+    const topicHeader = page.locator("header").first();
+    const topicHeaderActions = page.locator("[data-topic-header-actions]");
+    const topicHeaderBox = await topicHeader.boundingBox();
+    const topicHeaderActionsBox = await topicHeaderActions.boundingBox();
+    expect(topicHeaderBox).not.toBeNull();
+    expect(topicHeaderActionsBox).not.toBeNull();
+    if (!topicHeaderBox || !topicHeaderActionsBox) {
+      throw new Error("topic header or header actions were not measurable");
+    }
+    expect(topicHeaderActionsBox.x).toBeGreaterThan(topicHeaderBox.x + topicHeaderBox.width / 2);
+    await expect(
+      page.locator("[data-board-sidebar]").getByRole("button", {
+        name: "Generate analysis report",
+      }),
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Program record" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Open paper" }).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Comment composer" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Comment threads" })).toBeVisible();
   });
 
   for (const authorName of ["Yun Huang", "Yiren Liu", "Hyanghee Park"]) {
@@ -358,22 +533,6 @@ test.describe("v2 author workflow", () => {
     await expect(page.getByRole("button", { name: "Add sticky note" })).toHaveCount(0);
   });
 
-  test("legacy locked idea routes open the normal detail view", async ({ page }) => {
-    await page.goto("/marketplace?author=Yun%20Huang");
-    await expect(page.getByRole("heading", { name: "Shared idea board" })).toBeVisible();
-    const yirenCard = page.locator("[data-marketplace-sticky]").filter({ hasText: "Yiren Liu" });
-    await expect(yirenCard.first()).toBeVisible();
-    const detailHref = await yirenCard
-      .first()
-      .locator("a[aria-label^='Open']")
-      .getAttribute("href");
-    if (!detailHref) throw new Error("marketplace detail href was missing");
-
-    await page.goto(detailHref.replace("?", "/locked?"));
-    await expect(page).not.toHaveURL(/\/locked/);
-    await expect(page.getByRole("heading", { name: "Shared collaboration board" })).toBeVisible();
-  });
-
   test("AI suggested themes keep default sticky content readable", async ({ page }) => {
     await createUniqueDraft(page);
     await expect(page.getByText("Draft canvas", { exact: true })).toBeVisible({ timeout: 15_000 });
@@ -418,6 +577,16 @@ test.describe("v2 author workflow", () => {
   });
 
   test("sticky notes can be enhanced with configurable AI", async ({ page }) => {
+    await page.route("**/api/canvas/enhance-sticky", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          text: "Evidence to add: connect this sticky note to a concrete CHI paper signal.",
+        }),
+      });
+    });
+
     await createUniqueDraft(page);
     await expect(page.getByText("Draft canvas", { exact: true })).toBeVisible({ timeout: 15_000 });
 
@@ -426,6 +595,7 @@ test.describe("v2 author workflow", () => {
     await page.getByRole("button", { name: "Enhance sticky with AI" }).click();
     await expect(page.getByRole("heading", { name: "Enhance sticky note" })).toBeVisible();
     await page.getByRole("button", { name: "Evidence" }).click();
+    await expect(page.getByText("Evidence to add:")).toBeVisible();
     await page.getByRole("button", { name: "Apply to sticky" }).click();
     await expect(firstSticky.locator("[data-sticky-note-body]")).toContainText("Evidence to add");
   });
@@ -436,7 +606,8 @@ test.describe("v2 author workflow", () => {
     await expect(page.getByText("Draft canvas", { exact: true })).toBeVisible({ timeout: 15_000 });
 
     const remoteText = `REMOTE LIVE UPDATE ${Date.now()}`;
-    const storeResponse = await page.request.get("/api/ideas/store");
+    const params = new URLSearchParams({ author: "Yun Huang" });
+    const storeResponse = await page.request.get(`/api/ideas/store?${params.toString()}`);
     expect(storeResponse.ok()).toBe(true);
     const storeState = (await storeResponse.json()) as {
       ideas: Array<{ id: string; notes: Array<Record<string, unknown>> }>;
@@ -531,7 +702,7 @@ test.describe("v2 author workflow", () => {
     await expect(page.getByRole("heading", { name: "Review synthesis" })).toBeVisible();
     await expectNoHorizontalOverflow(page);
     await page.getByRole("button", { name: "Publish", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Published synthesis" })).toBeVisible({
+    await expect(page.getByRole("heading", { name: "Comment composer" })).toBeVisible({
       timeout: 30_000,
     });
     await expectNoHorizontalOverflow(page);
@@ -547,13 +718,22 @@ test.describe("v2 author workflow", () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test("marketplace feedback is shared across browser contexts", async ({ browser }) => {
+  test("core v2 pages pass an axe accessibility smoke check", async ({ page }) => {
+    for (const route of ["/", "/login", "/dashboard?author=Ziyi%20Zhang"]) {
+      await page.goto(route);
+      await dismissTutorialIfPresent(page);
+      const results = await new AxeBuilder({ page }).include("main").analyze();
+      expect(results.violations).toEqual([]);
+    }
+  });
+
+  test("detail comments are shared across browser contexts", async ({ browser }) => {
     test.setTimeout(45_000);
     const yunContext = await browser.newContext();
     const yirenContext = await browser.newContext();
     const yunPage = await yunContext.newPage();
     const yirenPage = await yirenContext.newPage();
-    const sharedNote = `Cross-context marketplace note ${Date.now()}`;
+    const sharedNote = `Cross-context detail comment ${Date.now()}`;
 
     await createUniqueOpenIdea(yunPage);
     await yunPage.goto("/marketplace?author=Yun%20Huang");
@@ -562,16 +742,18 @@ test.describe("v2 author workflow", () => {
       .locator("[data-marketplace-sticky]")
       .filter({ hasText: "E2E workflow draft" })
       .first()
-      .hover();
-    await yunPage.getByPlaceholder("Add a marketplace sticky note").fill(sharedNote);
-    await yunPage.getByRole("button", { name: "Add sticky note" }).click();
-    await expect(yunPage.locator("[data-feedback-sticky]").first()).toContainText(sharedNote, {
-      timeout: 15_000,
-    });
+      .click();
+    await expect(yunPage.getByRole("heading", { name: "Comment composer" })).toBeVisible();
+    await yunPage.locator("select").selectOption("experiment_idea");
+    await yunPage.locator("textarea").first().fill(sharedNote);
+    await yunPage.getByRole("button", { name: "Post comment" }).click();
+    await expect(yunPage.getByText(sharedNote)).toBeVisible({ timeout: 15_000 });
 
-    await yirenPage.goto("/marketplace?author=Yiren%20Liu");
-    await expect(yirenPage.getByRole("heading", { name: "Shared idea board" })).toBeVisible();
-    await expect(yirenPage.getByText(sharedNote)).toBeVisible();
+    const detailUrl = new URL(yunPage.url());
+    detailUrl.searchParams.set("author", "Yiren Liu");
+    await yirenPage.goto(`${detailUrl.pathname}${detailUrl.search}`);
+    await expect(yirenPage.getByRole("heading", { name: "Comment composer" })).toBeVisible();
+    await expect(yirenPage.getByText(sharedNote)).toBeVisible({ timeout: 15_000 });
 
     await yunContext.close();
     await yirenContext.close();
@@ -595,7 +777,7 @@ test.describe("v2 author workflow", () => {
     await dismissTutorialIfPresent(page);
     const authorHeading = page.getByRole("heading", { name: "Yun Huang" });
     const publicationsHeading = page.getByRole("heading", { name: "My Publications" });
-    const ideasLabel = page.getByText("My Ideas", { exact: true });
+    const ideasLabel = page.getByRole("heading", { name: "My idea workspace" });
     const authorBox = await authorHeading.boundingBox();
     const publicationsBox = await publicationsHeading.boundingBox();
     const ideasBox = await ideasLabel.boundingBox();
@@ -608,12 +790,11 @@ test.describe("v2 author workflow", () => {
     expect(authorBox.y + authorBox.height).toBeLessThan(publicationsBox.y);
     expect(publicationsBox.y).toBeLessThan(ideasBox.y);
 
-    await expect(page.getByRole("heading", { name: "Topics and collaborators" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Broader topics" })).toBeVisible();
     await dismissTutorialIfPresent(page);
     const firstTopic = page.locator("[data-topic-card]").first();
     await expect(firstTopic).toBeVisible();
-    await firstTopic.locator("[data-collaborator-name]").first().click();
-    await expect(firstTopic.locator("[data-collaborator-work]")).toBeVisible();
+    await expect(firstTopic.getByRole("button", { name: "Join topic" })).toBeVisible();
     await createUniqueDraft(page);
     await expect(page.getByText("Draft canvas", { exact: true })).toBeVisible({ timeout: 15_000 });
 
@@ -725,7 +906,7 @@ test.describe("v2 author workflow", () => {
     await page.getByRole("button", { name: "Publish to marketplace" }).click();
     await expect(page.getByRole("heading", { name: "Review synthesis" })).toBeVisible();
     await page.getByRole("button", { name: "Publish", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Published synthesis" })).toBeVisible({
+    await expect(page.getByRole("heading", { name: "Comment composer" })).toBeVisible({
       timeout: 15_000,
     });
     await expect(page.getByText(customNote).first()).toBeVisible();
@@ -733,10 +914,12 @@ test.describe("v2 author workflow", () => {
     await expect(page.getByRole("button", { name: "Edit fields" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Iterate with AI" })).toHaveCount(0);
 
-    const marketplaceSticky = "Marketplace sticky note from E2E";
     await page.getByRole("link", { name: "Marketplace" }).click();
     await expect(page.getByRole("heading", { name: "Shared idea board" })).toBeVisible();
-    const marketplaceCard = page.locator("[data-marketplace-sticky]").first();
+    const marketplaceCard = page
+      .locator("[data-marketplace-sticky]")
+      .filter({ hasText: "E2E workflow draft" })
+      .first();
     await expect(marketplaceCard).toBeVisible();
     const marketplaceDescriptionBox = await marketplaceCard
       .locator("[data-marketplace-card-description]")
@@ -752,15 +935,10 @@ test.describe("v2 author workflow", () => {
     expect(marketplaceDescriptionBox.y + marketplaceDescriptionBox.height).toBeLessThanOrEqual(
       marketplaceFooterBox.y + 1,
     );
-    await page.getByPlaceholder("Add a marketplace sticky note").fill(marketplaceSticky);
-    await page.getByRole("button", { name: "Add sticky note" }).click();
-    await expect(page.locator("[data-feedback-sticky]").first()).toContainText(marketplaceSticky, {
-      timeout: 15_000,
-    });
-    await page.getByRole("link", { name: "Open detail" }).click();
+    await marketplaceCard.click();
     await expect(page.getByRole("heading", { name: "Shared collaboration board" })).toBeVisible();
     await expect(page.locator("[data-board-viewport]")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Published synthesis" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Comment composer" })).toBeVisible();
 
     await page.locator("select").selectOption("method_critique");
     await page.locator("textarea").fill(customComment);

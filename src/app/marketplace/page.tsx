@@ -1,6 +1,6 @@
 import { MarketplaceClient } from "@/components/v2/MarketplaceClient";
 import { auth } from "@/lib/auth";
-import { getAuthorByName } from "@/lib/papers/catalog";
+import { resolvePageAuthor } from "@/lib/auth/author";
 
 type MarketplacePageProps = {
   searchParams?: Promise<{
@@ -11,9 +11,7 @@ type MarketplacePageProps = {
 export default async function MarketplacePage({ searchParams }: MarketplacePageProps) {
   const params = (await searchParams) ?? {};
   const session = await auth();
-  const author =
-    (params.author ? getAuthorByName(params.author) : null) ??
-    (session?.user?.name ? getAuthorByName(session.user.name) : null);
+  const author = resolvePageAuthor(session, params.author);
 
   return <MarketplaceClient viewerName={author?.name ?? null} />;
 }

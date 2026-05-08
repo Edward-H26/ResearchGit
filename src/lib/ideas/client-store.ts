@@ -28,12 +28,24 @@ export type {
 export { dedupeIdeasByOwnerAndCard };
 
 const STORE_UPDATED_EVENT = "researchgit:idea-store-updated";
-const POLL_INTERVAL_MS = 1500;
+const STORE_UPDATED_STORAGE_KEY = "researchgit:idea-store-updated-at";
+const STORE_UPDATED_CHANNEL = "researchgit:idea-store";
+const POLL_INTERVAL_MS = 600;
 
 type StoreListener = () => void | Promise<void>;
 
+function getBroadcastChannel(): BroadcastChannel | null {
+  if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") return null;
+  return new BroadcastChannel(STORE_UPDATED_CHANNEL);
+}
+
 function emitStoreUpdated() {
+  const updatedAt = Date.now().toString();
   window.dispatchEvent(new Event(STORE_UPDATED_EVENT));
+  window.localStorage.setItem(STORE_UPDATED_STORAGE_KEY, updatedAt);
+  const channel = getBroadcastChannel();
+  channel?.postMessage({ type: STORE_UPDATED_EVENT, updatedAt });
+  channel?.close();
 }
 
 async function postIdeaAction(
@@ -51,8 +63,16 @@ async function postIdeaAction(
   return result;
 }
 
+function ideaStoreReadPath(): string {
+  if (typeof window === "undefined") return "/api/ideas/store";
+  const authorName = new URLSearchParams(window.location.search).get("author");
+  if (!authorName) return "/api/ideas/store";
+  const params = new URLSearchParams({ author: authorName });
+  return `/api/ideas/store?${params.toString()}`;
+}
+
 export async function loadIdeaStoreState(): Promise<IdeaStoreState> {
-  const response = await fetch("/api/ideas/store", { cache: "no-store" });
+  const response = await fetch(ideaStoreReadPath(), { cache: "no-store" });
   if (!response.ok) throw new Error("Idea store read failed");
   return (await response.json()) as IdeaStoreState;
 }
@@ -74,6 +94,13 @@ export async function createIdeaFromCard(
   authorName: string,
 ): Promise<IdeaRecord | null> {
   return (await postIdeaAction("createIdeaFromCard", { card, authorName })).idea;
+}
+
+export async function createTopicIdeaFromCard(
+  card: IdeaCard,
+  actorName: string,
+): Promise<IdeaRecord | null> {
+  return (await postIdeaAction("createTopicIdeaFromCard", { card, actorName })).idea;
 }
 
 export async function deleteIdea(ideaId: string, actorName: string): Promise<IdeaRecord | null> {
@@ -175,12 +202,40 @@ export async function saveTopicRecommendationCount(
 }
 
 export function subscribeToIdeaStore(listener: StoreListener): () => void {
-  const notify = () => void listener();
+  let queued = false;
+  const channel = getBroadcastChannel();
+  const notify = () => {
+    if (queued) return;
+    queued = true;
+    window.setTimeout(() => {
+      queued = false;
+      void listener();
+    }, 50);
+  };
+  const notifyFromStorage = (event: StorageEvent) => {
+    if (event.key === STORE_UPDATED_STORAGE_KEY) notify();
+  };
+  const notifyFromVisibility = () => {
+    if (document.visibilityState === "visible") notify();
+  };
+  const notifyFromChannel = (event: MessageEvent) => {
+    if ((event.data as { type?: string }).type === STORE_UPDATED_EVENT) notify();
+  };
+
   window.addEventListener(STORE_UPDATED_EVENT, notify);
+  window.addEventListener("storage", notifyFromStorage);
+  window.addEventListener("focus", notify);
+  document.addEventListener("visibilitychange", notifyFromVisibility);
+  channel?.addEventListener("message", notifyFromChannel);
   const intervalId = window.setInterval(notify, POLL_INTERVAL_MS);
 
   return () => {
     window.removeEventListener(STORE_UPDATED_EVENT, notify);
+    window.removeEventListener("storage", notifyFromStorage);
+    window.removeEventListener("focus", notify);
+    document.removeEventListener("visibilitychange", notifyFromVisibility);
+    channel?.removeEventListener("message", notifyFromChannel);
+    channel?.close();
     window.clearInterval(intervalId);
   };
 }

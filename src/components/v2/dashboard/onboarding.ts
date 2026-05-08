@@ -1,51 +1,88 @@
 export type DashboardOnboardingStep = {
+  label: string;
   title: string;
   body: string;
-  focus: string;
+  location: string;
+  useWhen: string;
   action: string;
+  next: string;
 };
 
 export const FIRST_ONBOARDING_STEP: DashboardOnboardingStep = {
-  title: "Account and author match",
-  body: "Google sign-in creates your ResearchGit account, then the lookup links it to one CHI 2026 author profile.",
-  focus: "Author lookup and dashboard identity",
-  action: "Confirm the CHI record that matches the paper record you want to use.",
+  label: "Start",
+  title: "Match your CHI identity",
+  body: "Use Google sign-in to create your account, then match yourself to one CHI 2026 author record before any workspace opens.",
+  location: "Landing page and author lookup",
+  useWhen:
+    "Use this first so recommendations, drafts, comments, and topic activity belong to the right author.",
+  action: "Search your CHI author name, confirm the paper record, and continue to the dashboard.",
+  next: "The dashboard becomes your personal route into papers, ideas, topics, and canvases.",
 };
 
 export const ONBOARDING_STEPS: DashboardOnboardingStep[] = [
   FIRST_ONBOARDING_STEP,
   {
-    title: "Publications",
-    body: "Review your CHI papers, unfold descriptions when needed, and select up to five papers to ground a new idea.",
-    focus: "My Publications",
+    label: "Papers",
+    title: "Scan your CHI papers",
+    body: "Start with your own CHI 2026 publications. The folded description keeps the page compact while still letting you inspect abstracts when needed.",
+    location: "My Publications",
+    useWhen: "Use this section when you want a draft grounded in specific source papers.",
     action:
-      "Open descriptions only when you need the abstract, then select the strongest source papers.",
+      "Open a description, compare the paper context, and select up to five papers that should seed the idea.",
+    next: "Selected papers unlock a more focused idea generation path.",
   },
   {
-    title: "Recommendations",
-    body: "Use recommended papers, topics, and collaborator profiles to find adjacent directions beyond your own work.",
-    focus: "Topics and collaborators",
-    action: "Open collaborator chips to inspect related work before joining a topic.",
-  },
-  {
-    title: "Idea generation",
-    body: "Generate ideas from selected papers or from your full author history, then reopen drafts from the left rail.",
-    focus: "My Ideas",
+    label: "Ideas",
+    title: "Generate a draft route",
+    body: "Use the idea workspace to turn selected papers, or all of your CHI papers, into draft research directions.",
+    location: "My idea workspace",
+    useWhen:
+      "Use selected papers for a focused draft, or all papers when you want a broader set of directions.",
     action:
-      "Start from selected papers for a focused draft or use all experience for a broader draft.",
+      "Choose Generate ideas or From all my papers at CHI 2026, then open the draft card that appears.",
+    next: "Draft cards lead into a private canvas where you can shape the idea before publishing.",
   },
   {
-    title: "Draft canvas",
-    body: "Develop hypotheses, methods, novelty, and citations with sticky notes, resizing, search, AI enhancement, and AI suggested themes.",
-    focus: "Draft canvas",
+    label: "Topics",
+    title: "Explore broader sessions",
+    body: "Broader topics are session groups from the CHI 2026 data. They work like a conference map for finding adjacent papers and communities.",
+    location: "Broader topics",
+    useWhen: "Use this when you want directions outside your immediate paper list.",
     action:
-      "Move, resize, search, and edit notes before using AI suggested themes to organize the canvas.",
+      "Click Generate more to search by keywords, review the generated topic cards, and pass or join them.",
+    next: "Joining a topic expands the session workspace in the same dashboard section.",
   },
   {
-    title: "Marketplace feedback",
-    body: "Publish for feedback, collect comments, and continue improving the idea through saved versions.",
-    focus: "Marketplace canvas",
-    action: "Publish when the draft is ready for feedback, then use comments to guide iteration.",
+    label: "Canvas",
+    title: "Join a shared topic canvas",
+    body: "A joined topic opens a shared workspace with a sticky note area and same-session paper anchors.",
+    location: "Topic workspace and topic canvas",
+    useWhen: "Use this when you want to think with other researchers around one session theme.",
+    action:
+      "Join a topic, scan the session papers, then open the canvas when you are ready to add notes.",
+    next: "The canvas is where the public thinking and clustering happens.",
+  },
+  {
+    label: "Notes",
+    title: "Build with sticky notes",
+    body: "Sticky notes capture hypotheses, methods, novelty, concerns, and paper links. Search jumps to notes, and AI assist can refine a selected note.",
+    location: "Draft canvas or topic canvas",
+    useWhen:
+      "Use notes when the idea is still fluid and should be spatial, editable, and collaborative.",
+    action:
+      "Add a note, drag it near related notes, search it from the sidebar, then use Enhance sticky with AI when wording needs refinement.",
+    next: "Once the canvas has enough material, use synthesis and comments to move from notes to a proposal direction.",
+  },
+  {
+    label: "Feedback",
+    title: "Comment and synthesize",
+    body: "Published ideas and topic canvases use comments for structured feedback. Topic canvases can also generate an analysis report from the accumulated notes.",
+    location: "Idea detail page and topic canvas",
+    useWhen:
+      "Use comments for critique, related work, experiment ideas, and concerns after the core idea is visible.",
+    action:
+      "Post a typed comment, review the thread, then generate an analysis report when the canvas has enough notes.",
+    next: "Use feedback and saved versions to keep iterating without losing the earlier draft state.",
   },
 ];
 

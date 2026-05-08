@@ -22,6 +22,7 @@ export const env = createEnv({
       ),
     OPENAI_API_KEY: z.string().min(1).optional(),
     OPENAI_MODEL: z.string().min(1).optional(),
+    RESEARCHGIT_E2E_AUTHOR_BYPASS: z.enum(["1"]).optional(),
   },
   client: {},
   runtimeEnv: {
@@ -36,6 +37,7 @@ export const env = createEnv({
     ADMIN_EMAILS: process.env.ADMIN_EMAILS,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     OPENAI_MODEL: process.env.OPENAI_MODEL,
+    RESEARCHGIT_E2E_AUTHOR_BYPASS: process.env.RESEARCHGIT_E2E_AUTHOR_BYPASS,
   },
   skipValidation: process.env.SKIP_ENV_VALIDATION === "true",
   emptyStringAsUndefined: true,

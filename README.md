@@ -1,8 +1,8 @@
 # ResearchGit V2
 
-A research-ideation platform for CHI 2026 authors. Sign in with Google, match a CHI author record, see recommended papers and potential collaborators grounded in published work, develop a research idea on a sticky-note canvas with AI-clustered themes, publish to a shared marketplace, gather typed comments, and continue improving the draft through saved versions.
+A research-ideation platform for CHI 2026 authors. Sign in with Google, match a CHI author record, browse authored papers, join broader topic canvases grounded in the CHI program, develop a research idea on a sticky-note canvas with AI-clustered themes, publish to a shared marketplace, gather typed comments, and continue improving the draft through saved versions.
 
-Spec: [`SPEC.md`](./SPEC.md). Implementation plan: [`plans/abstract-pondering-starfish.md`](./plans/abstract-pondering-starfish.md). Archived V0/V1 specs: [`archive/`](./archive/).
+Spec: [`SPEC.md`](./SPEC.md). Current module notes: [`plans/abstract-pondering-starfish.md`](./plans/abstract-pondering-starfish.md). Archived V0/V1 specs: [`archive/`](./archive/).
 
 ## Stack
 
@@ -46,6 +46,7 @@ dynamic per-user state (User, Idea, IdeaVersion, Sticky, Comment, and topic reco
 | `pnpm typecheck:scripts` | `tsc --noEmit` over `scripts/` |
 | `pnpm check` | `biome check src/ scripts/` |
 | `pnpm format` | `biome format --write src/ scripts/` |
+| `pnpm lint` | `biome lint src/ scripts/` |
 | `pnpm test` | Vitest unit tests once |
 | `pnpm test:watch` | Vitest in watch mode |
 | `pnpm test:e2e` | Playwright E2E tests |
@@ -70,7 +71,8 @@ Key cuts from V1:
 | App routes | `src/app/` |
 | API route handlers | `src/app/api/` |
 | Page components | `src/components/v2/` |
-| V2 UI workflow helpers | `src/components/v2/dashboard/`, `src/components/v2/idea-detail/` |
+| V2 UI workflow helpers | `src/components/v2/dashboard/`, `src/components/v2/idea-detail/`, `src/components/v2/idea-draft/` |
+| Idea mutation validation | `src/lib/ideas/store-actions.ts` |
 | Database driver | `src/lib/neo4j.ts` |
 | Auth | `src/lib/auth.ts`, `src/lib/auth/`, `src/proxy.ts` |
 | Paper ingest + lookup | `src/lib/papers/` |
@@ -82,7 +84,7 @@ Key cuts from V1:
 
 ## Recommendation algorithm
 
-`src/lib/recommendation/algorithm.md` documents the PapersClaw reference inspection and the deterministic local reproduction. The current app uses portable scoring over `papers_by_room.json` so dashboard recommendations, topic generation, and tests do not depend on external credentials.
+`src/lib/recommendation/algorithm.md` documents the deterministic topic engine. The current app groups CHI 2026 records from `papers_by_room.json`, recommends broader same-topic canvases, and keeps idea generation, dashboard recommendations, and tests independent from external services.
 
 ## Conventions
 

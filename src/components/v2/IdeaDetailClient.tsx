@@ -1,25 +1,18 @@
 "use client";
 
 import { StickyNotesBoard } from "@/components/canvas";
-import { COMMENT_TYPE_LABELS, commentReactionCount } from "@/components/v2/idea-detail/comments";
+import { useDebouncedIdeaNotes } from "@/components/v2/hooks/useDebouncedIdeaNotes";
+import { CommentWorkspace } from "@/components/v2/idea-detail/CommentWorkspace";
 import type { StickyNote } from "@/lib/canvas";
 import { THEME_DISPLAY_DEFINITIONS, UNGROUPED_THEME_INDEX } from "@/lib/ideas";
 import {
-  addCommentToIdea,
   getIdeaById,
   saveIdeaNotes,
   subscribeToIdeaStore,
-  toggleCommentReaction,
   toggleIdeaUpvote,
 } from "@/lib/ideas/client-store";
-import {
-  COMMENT_TYPES,
-  type CommentType,
-  type IdeaCommentRecord,
-  type IdeaRecord,
-  REACTION_KINDS,
-} from "@/lib/ideas/store";
-import { getAuthorByName } from "@/lib/papers/catalog";
+import { type IdeaRecord, isTopicCanvasIdea } from "@/lib/ideas/store";
+import { getAuthorByName, getPaperById } from "@/lib/papers/catalog";
 import { marketplaceHref } from "@/lib/routes";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -32,10 +25,28 @@ type IdeaDetailClientProps = {
 export function IdeaDetailClient({ ideaId, viewerName }: IdeaDetailClientProps) {
   const [ready, setReady] = useState(false);
   const [idea, setIdea] = useState<IdeaRecord | null>(null);
-  const [commentType, setCommentType] = useState<CommentType>("general");
-  const [commentBody, setCommentBody] = useState("");
-  const [replyFor, setReplyFor] = useState<string | null>(null);
-  const [replyBody, setReplyBody] = useState("");
+  const currentIdeaId = idea?.id ?? null;
+  const viewer = viewerName ?? "";
+  const persistNotes = useCallback(
+    (notes: ReadonlyArray<StickyNote>) => {
+      if (!currentIdeaId) return Promise.resolve(null);
+      return saveIdeaNotes(currentIdeaId, notes, viewer);
+    },
+    [currentIdeaId, viewer],
+  );
+  const applySavedNotes = useCallback((updated: IdeaRecord) => {
+    setIdea(updated);
+  }, []);
+  const {
+    hasPendingLocalSave,
+    trackRemoteNotes,
+    saveNotes: queueNotesSave,
+  } = useDebouncedIdeaNotes({
+    delayMs: 500,
+    localEditGraceMs: 900,
+    persist: persistNotes,
+    applyUpdated: applySavedNotes,
+  });
 
   useEffect(() => {
     let canceled = false;
@@ -49,18 +60,19 @@ export function IdeaDetailClient({ ideaId, viewerName }: IdeaDetailClientProps) 
     }
 
     void loadIdea();
-    const unsubscribe = subscribeToIdeaStore(loadIdea);
+    const unsubscribe = subscribeToIdeaStore(() => {
+      if (!hasPendingLocalSave()) void loadIdea();
+    });
     return () => {
       canceled = true;
       unsubscribe();
     };
-  }, [ideaId]);
+  }, [hasPendingLocalSave, ideaId]);
 
-  const viewer = viewerName ?? "";
   const viewerAuthor = viewerName ? getAuthorByName(viewerName) : null;
   const isOwner = idea?.ownerName === viewerAuthor?.name;
+  const isTopicCanvas = idea ? isTopicCanvasIdea(idea) : false;
   const isPrivateIdea = idea?.status === "locked";
-  const currentIdeaId = idea?.id ?? null;
   const canvasThemeLabels = useMemo(
     () =>
       idea
@@ -73,21 +85,26 @@ export function IdeaDetailClient({ ideaId, viewerName }: IdeaDetailClientProps) 
         : [],
     [idea],
   );
-  const topLevelComments = useMemo(
-    () => idea?.comments.filter((comment) => comment.parentCommentId === null) ?? [],
-    [idea],
-  );
-  const repliesByParent = useMemo(() => {
-    const map = new Map<string, IdeaCommentRecord[]>();
-    for (const comment of idea?.comments ?? []) {
-      if (!comment.parentCommentId) continue;
-      map.set(comment.parentCommentId, [...(map.get(comment.parentCommentId) ?? []), comment]);
-    }
-    return map;
+  const canvasPaperContext = useMemo(() => {
+    if (!idea) return [];
+    return idea.groundingPaperIds
+      .map((paperId) => getPaperById(paperId))
+      .filter((paper) => paper !== null);
   }, [idea]);
+  const stickyEnhancementContext = useMemo(
+    () => ({
+      topicLabel: isTopicCanvas ? idea?.title : undefined,
+      relatedPaperTitles: canvasPaperContext.map((paper) => paper.title),
+      sourceSummary: idea ? [idea.hypothesis, idea.methodology].join("\n") : undefined,
+    }),
+    [canvasPaperContext, idea, isTopicCanvas],
+  );
 
   function applyUpdated(updated: IdeaRecord | null) {
-    if (updated) setIdea(updated);
+    if (updated) {
+      trackRemoteNotes(updated.notes);
+      setIdea(updated);
+    }
   }
 
   const saveCanvasNotes = useCallback(
@@ -98,30 +115,14 @@ export function IdeaDetailClient({ ideaId, viewerName }: IdeaDetailClientProps) 
           ? { ...current, notes: [...notes], updatedAt: new Date().toISOString() }
           : current,
       );
-      const updated = await saveIdeaNotes(currentIdeaId, notes, viewer);
-      if (updated) setIdea(updated);
+      queueNotesSave(notes);
     },
-    [currentIdeaId, viewer],
+    [currentIdeaId, queueNotesSave],
   );
 
-  async function submitComment(parentCommentId: string | null) {
-    const body = parentCommentId ? replyBody : commentBody;
-    if (!idea || body.trim().length === 0) return;
-    const updated = await addCommentToIdea({
-      ideaId: idea.id,
-      authorName: viewer,
-      type: parentCommentId ? "general" : commentType,
-      body,
-      parentCommentId,
-    });
-    applyUpdated(updated);
-    if (parentCommentId) {
-      setReplyBody("");
-      setReplyFor(null);
-    } else {
-      setCommentBody("");
-    }
-  }
+  useEffect(() => {
+    if (idea) trackRemoteNotes(idea.notes);
+  }, [idea, trackRemoteNotes]);
 
   if (!ready) {
     return (
@@ -240,7 +241,9 @@ export function IdeaDetailClient({ ideaId, viewerName }: IdeaDetailClientProps) 
             <p className="mt-2 text-sm leading-relaxed text-neutral-600">
               {isOwner
                 ? "Review and refine the canvas while this idea remains open."
-                : "Review the published canvas. Contributor feedback belongs in comments below."}
+                : isTopicCanvas
+                  ? "Add sticky notes to the public topic canvas with other interested researchers."
+                  : "Review the published canvas. Contributor feedback belongs in comments below."}
             </p>
           </div>
           <div className="h-[520px] sm:h-[620px]">
@@ -250,165 +253,16 @@ export function IdeaDetailClient({ ideaId, viewerName }: IdeaDetailClientProps) 
               themeLabels={canvasThemeLabels}
               boardTitle="Shared canvas"
               boardSubtitle="Marketplace collaboration"
+              enhancementContext={stickyEnhancementContext}
               onChange={saveCanvasNotes}
-              readOnly={!isOwner}
+              readOnly={!isOwner && !isTopicCanvas}
             />
           </div>
         </section>
 
-        <div className="mt-8 grid gap-6 xl:grid-cols-[1.12fr_0.88fr]">
-          <section className="rounded-[28px] border border-black/5 bg-white p-5 shadow-[0_24px_80px_rgba(57,44,18,0.08)] sm:p-6">
-            <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">
-              Published synthesis
-            </h2>
-            <div className="mt-5 space-y-6">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-                  Methodology
-                </p>
-                <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-neutral-700">
-                  {idea.methodology}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-                  Novelty
-                </p>
-                <ul className="mt-3 space-y-2">
-                  {idea.novelty.map((point) => (
-                    <li
-                      key={point}
-                      className="rounded-2xl bg-[#faf5ef] px-4 py-3 text-sm text-neutral-700"
-                    >
-                      {point}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-                  Grounding citations
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {idea.citations.map((citation) => (
-                    <span
-                      key={citation}
-                      className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-600"
-                    >
-                      {citation}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <aside className="space-y-6">
-            <section className="rounded-[28px] border border-black/5 bg-white p-5 shadow-[0_24px_80px_rgba(57,44,18,0.08)] sm:p-6">
-              <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">Comment composer</h2>
-              <div className="mt-4 grid gap-3">
-                <select
-                  value={commentType}
-                  onChange={(event) => setCommentType(event.target.value as CommentType)}
-                  className="rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-sm outline-none focus:border-neutral-950"
-                >
-                  {COMMENT_TYPES.map((type) => (
-                    <option key={type} value={type}>
-                      {COMMENT_TYPE_LABELS[type]}
-                    </option>
-                  ))}
-                </select>
-                <textarea
-                  value={commentBody}
-                  onChange={(event) => setCommentBody(event.target.value)}
-                  maxLength={2000}
-                  rows={5}
-                  placeholder="Write a structured comment"
-                  className="w-full resize-none rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-sm outline-none focus:border-neutral-950"
-                />
-                <button
-                  type="button"
-                  onClick={() => void submitComment(null)}
-                  className="rounded-full bg-neutral-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800"
-                >
-                  Post comment
-                </button>
-              </div>
-            </section>
-          </aside>
+        <div className="mt-8">
+          <CommentWorkspace idea={idea} viewerName={viewer} onIdeaUpdated={applyUpdated} />
         </div>
-
-        <section className="mt-6 rounded-[28px] border border-black/5 bg-white p-5 shadow-[0_24px_80px_rgba(57,44,18,0.08)] sm:p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">Comment threads</h2>
-            <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-semibold text-neutral-600">
-              Depth max 1
-            </span>
-          </div>
-          <div className="mt-5 grid gap-4">
-            {topLevelComments.map((comment) => (
-              <article key={comment.id} className="rounded-[24px] border border-neutral-200 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-neutral-900">{comment.authorName}</p>
-                    <span className="mt-1 inline-flex rounded-full bg-neutral-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-neutral-600">
-                      {COMMENT_TYPE_LABELS[comment.type]}
-                    </span>
-                  </div>
-                </div>
-                <p className="mt-3 text-sm leading-relaxed text-neutral-700">{comment.body}</p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {REACTION_KINDS.map((kind) => (
-                    <button
-                      key={kind}
-                      type="button"
-                      onClick={() =>
-                        void toggleCommentReaction(idea.id, comment.id, kind, viewer).then(
-                          applyUpdated,
-                        )
-                      }
-                      className="rounded-full border border-neutral-300 px-3 py-1 text-sm transition hover:border-neutral-950"
-                    >
-                      {kind} {commentReactionCount(comment, kind)}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setReplyFor(replyFor === comment.id ? null : comment.id)}
-                    className="rounded-full border border-neutral-300 px-3 py-1 text-sm font-semibold transition hover:border-neutral-950"
-                  >
-                    Reply
-                  </button>
-                </div>
-                {replyFor === comment.id ? (
-                  <div className="mt-4 grid gap-3 rounded-[20px] bg-[#fcfbf8] p-4">
-                    <textarea
-                      value={replyBody}
-                      onChange={(event) => setReplyBody(event.target.value)}
-                      maxLength={2000}
-                      rows={3}
-                      placeholder="Reply to this thread"
-                      className="w-full resize-none rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-sm outline-none focus:border-neutral-950"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void submitComment(comment.id)}
-                      className="w-fit rounded-full bg-neutral-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-neutral-800"
-                    >
-                      Post reply
-                    </button>
-                  </div>
-                ) : null}
-                {(repliesByParent.get(comment.id) ?? []).map((reply) => (
-                  <div key={reply.id} className="mt-4 rounded-[20px] bg-[#fcfbf8] p-4">
-                    <p className="text-sm font-semibold">{reply.authorName}</p>
-                    <p className="mt-2 text-sm leading-relaxed text-neutral-600">{reply.body}</p>
-                  </div>
-                ))}
-              </article>
-            ))}
-          </div>
-        </section>
       </div>
     </main>
   );

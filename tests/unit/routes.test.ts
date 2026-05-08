@@ -4,6 +4,8 @@ import {
   ideaHref,
   marketplaceHref,
   onboardingDashboardHref,
+  topicHref,
+  topicPaperHref,
 } from "@/lib/routes";
 import { describe, expect, it } from "vitest";
 
@@ -15,6 +17,12 @@ describe("route helpers", () => {
       "/dashboard?author=Yun%20Huang&onboard=login%201",
     );
     expect(marketplaceHref("Yun Huang")).toBe("/marketplace?author=Yun%20Huang");
+    expect(topicHref("multi-agent-reasoning", "Yun Huang")).toBe(
+      "/topics/multi-agent-reasoning?author=Yun%20Huang",
+    );
+    expect(topicPaperHref("multi-agent-reasoning", "paper/one", "Yun Huang")).toBe(
+      "/topics/multi-agent-reasoning/papers/paper%2Fone?author=Yun%20Huang",
+    );
   });
 
   it("builds selected-paper idea generation routes", () => {
@@ -32,6 +40,15 @@ describe("route helpers", () => {
     );
     expect(ideaHref("idea-1", "locked", "Hyanghee Park")).toBe(
       "/ideas/idea-1?author=Hyanghee%20Park",
+    );
+  });
+
+  it("encodes idea ids before building draft and detail routes", () => {
+    expect(ideaHref("draft/with #reserved?", "draft", "Ziyi Zhang")).toBe(
+      "/ideas/draft%2Fwith%20%23reserved%3F/draft?author=Ziyi%20Zhang",
+    );
+    expect(ideaHref("open/with #reserved?", "open", "Ziyi Zhang")).toBe(
+      "/ideas/open%2Fwith%20%23reserved%3F?author=Ziyi%20Zhang",
     );
   });
 });

@@ -4,6 +4,10 @@ function authorQuery(authorName: string): string {
   return `author=${encodeURIComponent(authorName)}`;
 }
 
+function pathSegment(value: string): string {
+  return encodeURIComponent(value);
+}
+
 export function dashboardHref(authorName: string): string {
   return `/dashboard?${authorQuery(authorName)}`;
 }
@@ -14,6 +18,14 @@ export function onboardingDashboardHref(authorName: string, onboardingKey = "1")
 
 export function marketplaceHref(authorName: string): string {
   return `/marketplace?${authorQuery(authorName)}`;
+}
+
+export function topicHref(topicId: string, authorName: string): string {
+  return `/topics/${pathSegment(topicId)}?${authorQuery(authorName)}`;
+}
+
+export function topicPaperHref(topicId: string, paperId: string, authorName: string): string {
+  return `/topics/${pathSegment(topicId)}/papers/${pathSegment(paperId)}?${authorQuery(authorName)}`;
 }
 
 export function ideaGenerationHref(
@@ -29,8 +41,9 @@ export function ideaGenerationHref(
 }
 
 export function ideaHref(id: string, status: IdeaStatus | string, authorName: string): string {
-  if (status === "draft") return `/ideas/${id}/draft?${authorQuery(authorName)}`;
-  return `/ideas/${id}?${authorQuery(authorName)}`;
+  const ideaId = pathSegment(id);
+  if (status === "draft") return `/ideas/${ideaId}/draft?${authorQuery(authorName)}`;
+  return `/ideas/${ideaId}?${authorQuery(authorName)}`;
 }
 
 export function ideaDetailHref(

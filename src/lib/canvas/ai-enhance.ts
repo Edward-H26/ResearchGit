@@ -2,73 +2,97 @@ export const STICKY_NOTE_ENHANCEMENT_OPTIONS = [
   {
     id: "clarity",
     label: "Clarity",
-    heading: "Refined note",
+    instruction: "Rewrite the note so the research claim is precise, grounded, and easy to act on.",
   },
   {
     id: "evidence",
     label: "Evidence",
-    heading: "Evidence to add",
+    instruction:
+      "Rewrite the note to name the paper evidence, user behavior, or evaluation signal needed to support it.",
   },
   {
     id: "method",
     label: "Method",
-    heading: "Method detail",
+    instruction:
+      "Rewrite the note as a method-oriented contribution with prototype, participants, comparison, and measurement details.",
   },
   {
     id: "shorten",
     label: "Shorten",
-    heading: "Condensed note",
+    instruction:
+      "Rewrite the note into a concise sticky note while preserving the core research implication.",
   },
   {
     id: "novelty",
     label: "Novelty",
-    heading: "Contribution angle",
+    instruction:
+      "Rewrite the note to foreground the CHI contribution, including what is new and why it matters.",
   },
 ] as const;
 
 export type StickyNoteEnhancementOptionId = (typeof STICKY_NOTE_ENHANCEMENT_OPTIONS)[number]["id"];
 
+export type StickyNoteEnhancementContext = {
+  boardTitle: string;
+  boardSubtitle?: string | undefined;
+  topicLabel?: string | undefined;
+  activePaperTitle?: string | undefined;
+  relatedPaperTitles?: string[] | undefined;
+  sourceSummary?: string | undefined;
+  themeLabels?: string[] | undefined;
+  otherNotes?: string[] | undefined;
+};
+
+export type StickyNoteEnhancementInput = {
+  noteText: string;
+  optionId: StickyNoteEnhancementOptionId;
+  context: StickyNoteEnhancementContext;
+};
+
 function compactText(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }
 
-function sentence(value: string): string {
-  const compacted = compactText(value);
-  if (!compacted) return "Clarify the claim, evidence, and next action for this sticky note.";
-  return /[.!?]$/.test(compacted) ? compacted : `${compacted}.`;
-}
-
-function optionHeading(optionId: StickyNoteEnhancementOptionId): string {
+export function stickyNoteEnhancementOption(
+  optionId: StickyNoteEnhancementOptionId,
+): (typeof STICKY_NOTE_ENHANCEMENT_OPTIONS)[number] {
   return (
-    STICKY_NOTE_ENHANCEMENT_OPTIONS.find((option) => option.id === optionId)?.heading ??
-    STICKY_NOTE_ENHANCEMENT_OPTIONS[0].heading
+    STICKY_NOTE_ENHANCEMENT_OPTIONS.find((option) => option.id === optionId) ??
+    STICKY_NOTE_ENHANCEMENT_OPTIONS[0]
   );
 }
 
-export function enhanceStickyNoteText(
-  text: string,
-  optionId: StickyNoteEnhancementOptionId,
-  contextTitle = "the current draft",
-): string {
-  const source = sentence(text);
-  const context = compactText(contextTitle) || "the current draft";
-  const heading = optionHeading(optionId);
+function listSection(label: string, values: ReadonlyArray<string> | undefined): string[] {
+  const cleaned = (values ?? []).map(compactText).filter(Boolean).slice(0, 6);
+  if (cleaned.length === 0) return [];
+  return [label, ...cleaned.map((value, index) => `${index + 1}. ${value}`)];
+}
 
-  if (optionId === "shorten") {
-    return `${heading}:\n${source.split(" ").slice(0, 24).join(" ")}`;
-  }
-
-  if (optionId === "evidence") {
-    return `${heading}:\n${source}\nConnect this point to ${context}, then name the paper detail, user behavior, or evaluation signal that would support it.`;
-  }
-
-  if (optionId === "method") {
-    return `${heading}:\n${source}\nSpecify the prototype, participants, comparison condition, and success measure needed to test this claim.`;
-  }
-
-  if (optionId === "novelty") {
-    return `${heading}:\n${source}\nFrame the CHI contribution as the new design capability, empirical insight, or workflow that this note makes possible.`;
-  }
-
-  return `${heading}:\n${source}\nMake the claim specific, grounded, and actionable for the next draft revision.`;
+export function buildStickyNoteEnhancementPrompt(input: StickyNoteEnhancementInput): string {
+  const option = stickyNoteEnhancementOption(input.optionId);
+  const context = input.context;
+  const sourceSummary = compactText(context.sourceSummary ?? "");
+  return [
+    "You are ChatGPT helping a CHI 2026 researcher refine one sticky note for a shared ResearchGit canvas.",
+    "Return only the improved sticky note text. Do not include headings, markdown, prefaces, or explanations.",
+    "Keep the output under 120 words and preserve the user's intent.",
+    option.instruction,
+    "",
+    `Canvas: ${compactText(context.boardTitle) || "ResearchGit canvas"}`,
+    context.boardSubtitle ? `Canvas subtitle: ${compactText(context.boardSubtitle)}` : "",
+    context.topicLabel ? `Broader topic: ${compactText(context.topicLabel)}` : "",
+    context.activePaperTitle ? `Active paper: ${compactText(context.activePaperTitle)}` : "",
+    sourceSummary ? `Source summary: ${sourceSummary.slice(0, 1200)}` : "",
+    "",
+    "Original sticky note:",
+    compactText(input.noteText) || "Untitled note",
+    "",
+    ...listSection("Related papers:", context.relatedPaperTitles),
+    "",
+    ...listSection("Nearby canvas notes:", context.otherNotes),
+    "",
+    ...listSection("Canvas themes:", context.themeLabels),
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
 }

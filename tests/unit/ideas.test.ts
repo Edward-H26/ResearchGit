@@ -2,6 +2,8 @@ import {
   UNGROUPED_THEME_INDEX,
   applyThemesToNotes,
   buildDraftNotes,
+  buildTopicIdeaCard,
+  buildTopicPaperIdeaCard,
   clusterNotesIntoThemes,
   generateIdeaCards,
   previewDraftEnhancement,
@@ -12,8 +14,11 @@ import {
   type IdeaVersionTrigger,
   addCommentToIdeaInState,
   createIdeaFromCardInState,
+  createTopicIdeaFromCardInState,
+  deleteCommentFromIdeaInState,
   deleteIdeaInState,
   getIdeasForAuthorFromState,
+  getVisibleIdeaStoreState,
   initialIdeaStoreState,
   normalizeIdeaStoreState,
   publishIdeaInState,
@@ -21,9 +26,12 @@ import {
   saveDraftVersionInState,
   saveIdeaNotesInState,
   saveTopicRecommendationCountInState,
+  toggleCommentReactionInState,
   toggleIdeaUpvoteInState,
 } from "@/lib/ideas/store";
+import { applyIdeaStoreAction } from "@/lib/ideas/store-actions";
 import { findCHIAuthorMatches, getAuthorByName, getPaperById } from "@/lib/papers/catalog";
+import { recommendTopicsForAuthor } from "@/lib/recommendation";
 import { describe, expect, it } from "vitest";
 
 function getRequiredAuthor(name = "Yun Huang") {
@@ -350,6 +358,77 @@ describe("idea store readiness", () => {
     expect(normalized.topicRecommendationCountByAuthor).toEqual({});
   });
 
+  it("persists topic joins by matched author without duplicating them", () => {
+    const author = getRequiredAuthor("Yun Huang");
+    const topic = recommendTopicsForAuthor(author.name, 1)[0]?.topic;
+    if (!topic) throw new Error("no topic recommendation was generated");
+    const firstJoin = createTopicIdeaFromCardInState(
+      initialIdeaStoreState(),
+      buildTopicIdeaCard(topic),
+      author.name,
+    );
+    const secondJoin = createTopicIdeaFromCardInState(
+      firstJoin.state,
+      buildTopicIdeaCard(topic),
+      author.name,
+    );
+
+    expect(firstJoin.state.joinedTopicIdsByAuthor[author.normalizedName]).toEqual([topic.id]);
+    expect(secondJoin.state.joinedTopicIdsByAuthor[author.normalizedName]).toEqual([topic.id]);
+    expect(secondJoin.idea?.id).toBe(firstJoin.idea?.id);
+  });
+
+  it("creates a separate canvas for a paper inside a broader topic", () => {
+    const author = getRequiredAuthor("Yun Huang");
+    const topic = recommendTopicsForAuthor(author.name, 1)[0]?.topic;
+    const paper = topic?.papers[0];
+    if (!topic || !paper) throw new Error("no topic paper was available");
+
+    const paperOnlyJoin = createTopicIdeaFromCardInState(
+      initialIdeaStoreState(),
+      buildTopicPaperIdeaCard(topic, paper),
+      author.name,
+    );
+    const topicJoin = createTopicIdeaFromCardInState(
+      initialIdeaStoreState(),
+      buildTopicIdeaCard(topic),
+      author.name,
+    );
+    const paperJoin = createTopicIdeaFromCardInState(
+      topicJoin.state,
+      buildTopicPaperIdeaCard(topic, paper),
+      author.name,
+    );
+
+    expect(topicJoin.idea?.id).not.toBe(paperJoin.idea?.id);
+    expect(paperOnlyJoin.idea?.groundingPaperIds).toEqual([paper.id]);
+    expect(paperOnlyJoin.state.joinedTopicIdsByAuthor[author.normalizedName] ?? []).toEqual([]);
+    expect(topicJoin.idea?.groundingPaperIds).toEqual(topic.papers.map((item) => item.id));
+    expect(paperJoin.idea?.groundingPaperIds).toEqual([paper.id]);
+    expect(paperJoin.state.joinedTopicIdsByAuthor[author.normalizedName]).toEqual([topic.id]);
+  });
+
+  it("normalizes older stores without joined topic state", () => {
+    const state = initialIdeaStoreState();
+    const legacyIdeas = state.ideas.map((idea, ideaIndex) => ({
+      ...idea,
+      notes: idea.notes.map((note, noteIndex) => {
+        if (ideaIndex !== 0 || noteIndex !== 0) return note;
+        const { versions: _versions, ...legacyNote } = note;
+        return legacyNote as typeof note;
+      }),
+    }));
+    const { joinedTopicIdsByAuthor: _joinedTopicIds, ...legacyState } = {
+      ...state,
+      ideas: legacyIdeas,
+    };
+
+    const normalized = normalizeIdeaStoreState(legacyState as typeof state);
+
+    expect(normalized.joinedTopicIdsByAuthor).toEqual({});
+    expect(normalized.ideas[0]?.notes[0]?.versions).toEqual([]);
+  });
+
   it("reuses an existing idea instead of duplicating the same generated card", () => {
     const author = getRequiredAuthor("Yun Huang");
     const ideaCard = generateIdeaCards([], author.name)[0];
@@ -436,11 +515,249 @@ describe("idea store readiness", () => {
       idea.notes,
     );
 
+    const anonymousAttempt = saveIdeaNotesInState(noteAttempt.state, idea.id, editedNotes);
+    expect(anonymousAttempt.idea).toBeNull();
+    expect(
+      anonymousAttempt.state.ideas.find((candidate) => candidate.id === idea.id)?.notes,
+    ).toEqual(idea.notes);
+
     const publishAttempt = publishIdeaInState(noteAttempt.state, idea.id, fields, "Yiren Liu");
     expect(publishAttempt.idea).toBeNull();
     expect(publishAttempt.state.ideas.find((candidate) => candidate.id === idea.id)?.status).toBe(
       "draft",
     );
+
+    const commentAttempt = addCommentToIdeaInState(noteAttempt.state, {
+      ideaId: idea.id,
+      authorName: "Yiren Liu",
+      type: "general",
+      body: "Non-owner draft comment",
+    });
+    expect(commentAttempt.idea).toBeNull();
+
+    const upvoteAttempt = toggleIdeaUpvoteInState(noteAttempt.state, idea.id, "Yiren Liu");
+    expect(upvoteAttempt.idea).toBeNull();
+  });
+
+  it("allows matched authors to co-edit shared topic canvas notes", () => {
+    const topic = recommendTopicsForAuthor("Yun Huang", 1)[0]?.topic;
+    if (!topic) throw new Error("no topic recommendation was generated");
+    const created = createTopicIdeaFromCardInState(
+      initialIdeaStoreState(),
+      buildTopicIdeaCard(topic),
+      "Yun Huang",
+    );
+    const idea = created.idea;
+    if (!idea) throw new Error("topic idea was not created");
+    const editedNotes = [
+      {
+        id: "topic-note-1",
+        text: "Shared topic note",
+        x: 100,
+        y: 120,
+        width: 240,
+        height: 180,
+        themeIndex: null,
+        themeColorToken: null,
+        authorUserId: "yiren-liu",
+        authorHandle: "Yiren Liu",
+        rotation: 0,
+        versions: [],
+      },
+    ];
+
+    const saved = saveIdeaNotesInState(created.state, idea.id, editedNotes, "Yiren Liu");
+
+    expect(saved.idea?.notes).toEqual(editedNotes);
+    expect(saved.idea?.ownerName).toBe("ResearchGit");
+  });
+
+  it("rejects unmatched authors at the store boundary", () => {
+    const author = getRequiredAuthor("Yun Huang");
+    const ideaCard = generateIdeaCards([], author.name)[0];
+    if (!ideaCard) throw new Error("no idea generated");
+    const state = initialIdeaStoreState();
+
+    const created = createIdeaFromCardInState(state, ideaCard, "Not A CHI Author");
+    expect(created.idea).toBeNull();
+    expect(created.state.ideas).toHaveLength(state.ideas.length);
+
+    const topic = recommendTopicsForAuthor(author.name, 1)[0]?.topic;
+    if (!topic) throw new Error("no topic recommendation was generated");
+    const topicCreated = createTopicIdeaFromCardInState(
+      state,
+      buildTopicIdeaCard(topic),
+      "Not A CHI Author",
+    );
+    expect(topicCreated.idea).toBeNull();
+  });
+
+  it("keeps the API mutation boundary portable and validated", () => {
+    const author = getRequiredAuthor("Yun Huang");
+    const ideaCard = generateIdeaCards([], author.name)[0];
+    if (!ideaCard) throw new Error("no idea generated");
+    const state = initialIdeaStoreState();
+    const openIdea = state.ideas.find((idea) => idea.status === "open");
+    if (!openIdea) throw new Error("seed open idea is missing");
+
+    const unmatchedCreate = applyIdeaStoreAction(state, {
+      action: "createIdeaFromCard",
+      payload: { authorName: "Not A CHI Author", card: ideaCard },
+    });
+    expect(unmatchedCreate.idea).toBeNull();
+
+    const validCreate = applyIdeaStoreAction(state, {
+      action: "createIdeaFromCard",
+      payload: { authorName: author.name, card: ideaCard },
+    });
+    expect(validCreate.idea?.ownerName).toBe(author.name);
+    if (!validCreate.idea) throw new Error("valid idea was not created");
+
+    const invalidCommentType = applyIdeaStoreAction(state, {
+      action: "addCommentToIdea",
+      payload: {
+        authorName: "Yiren Liu",
+        body: "Malformed comment",
+        ideaId: openIdea.id,
+        type: "invalid_type",
+      },
+    });
+    expect(invalidCommentType.idea).toBeNull();
+
+    const unmatchedVote = applyIdeaStoreAction(state, {
+      action: "toggleIdeaUpvote",
+      payload: { authorName: "Not A CHI Author", ideaId: openIdea.id },
+    });
+    expect(unmatchedVote.idea).toBeNull();
+
+    const invalidNotes = applyIdeaStoreAction(validCreate.state, {
+      action: "saveIdeaNotes",
+      payload: {
+        actorName: author.name,
+        ideaId: validCreate.idea.id,
+        notes: [{ id: "broken-note" }],
+      },
+    });
+    expect(invalidNotes.idea).toBeNull();
+
+    const invalidVersionTrigger = applyIdeaStoreAction(validCreate.state, {
+      action: "saveDraftVersion",
+      payload: {
+        actorName: author.name,
+        fields: {
+          citations: validCreate.idea.citations,
+          hypothesis: validCreate.idea.hypothesis,
+          methodology: validCreate.idea.methodology,
+          novelty: validCreate.idea.novelty,
+          title: validCreate.idea.title,
+        },
+        ideaId: validCreate.idea.id,
+        notes: validCreate.idea.notes,
+        summary: "Invalid trigger should not persist",
+        trigger: "not_a_trigger",
+      },
+    });
+    expect(invalidVersionTrigger.idea).toBeNull();
+  });
+
+  it("binds API store actions to the authorized author when provided", () => {
+    const author = getRequiredAuthor("Yun Huang");
+    const ideaCard = generateIdeaCards([], author.name)[0];
+    if (!ideaCard) throw new Error("no idea generated");
+    const state = initialIdeaStoreState();
+
+    const unauthenticatedCreate = applyIdeaStoreAction(
+      state,
+      {
+        action: "createIdeaFromCard",
+        payload: { authorName: "Yiren Liu", card: ideaCard },
+      },
+      null,
+    );
+    expect(unauthenticatedCreate.idea).toBeNull();
+
+    const authorizedCreate = applyIdeaStoreAction(
+      state,
+      {
+        action: "createIdeaFromCard",
+        payload: { authorName: "Yiren Liu", card: ideaCard },
+      },
+      author.name,
+    );
+    expect(authorizedCreate.idea?.ownerName).toBe(author.name);
+  });
+
+  it("filters private ideas from store reads unless the viewer owns them", () => {
+    const author = getRequiredAuthor("Ziyi Zhang");
+    const ideaCard = generateIdeaCards([], author.name)[0];
+    if (!ideaCard) throw new Error("no idea generated");
+    const created = createIdeaFromCardInState(initialIdeaStoreState(), ideaCard, author.name);
+    const draft = created.idea;
+    if (!draft) throw new Error("draft was not created");
+
+    expect(getVisibleIdeaStoreState(created.state).ideas.some((idea) => idea.id === draft.id)).toBe(
+      false,
+    );
+    expect(
+      getVisibleIdeaStoreState(created.state, "Yun Huang").ideas.some(
+        (idea) => idea.id === draft.id,
+      ),
+    ).toBe(false);
+    expect(
+      getVisibleIdeaStoreState(created.state, author.name).ideas.some(
+        (idea) => idea.id === draft.id,
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects invalid comment types and unmatched public mutations", () => {
+    const state = initialIdeaStoreState();
+    const source = state.ideas.find((idea) => idea.status === "open");
+    if (!source) throw new Error("seed open idea is missing");
+
+    const invalidComment = addCommentToIdeaInState(state, {
+      ideaId: source.id,
+      authorName: "Yiren Liu",
+      type: "invalid_type" as never,
+      body: "Malformed comment",
+    });
+    expect(invalidComment.idea).toBeNull();
+
+    const unmatchedComment = addCommentToIdeaInState(state, {
+      ideaId: source.id,
+      authorName: "Not A CHI Author",
+      type: "general",
+      body: "Should not persist",
+    });
+    expect(unmatchedComment.idea).toBeNull();
+
+    const unmatchedVote = toggleIdeaUpvoteInState(state, source.id, "Not A CHI Author");
+    expect(unmatchedVote.idea).toBeNull();
+
+    const validComment = addCommentToIdeaInState(state, {
+      ideaId: source.id,
+      authorName: "Yiren Liu",
+      type: "general",
+      body: "Valid comment",
+    });
+    const commentId = validComment.idea?.comments[0]?.id;
+    if (!commentId) throw new Error("valid comment was not created");
+    const invalidReaction = toggleCommentReactionInState(
+      validComment.state,
+      source.id,
+      commentId,
+      "invalid_reaction" as never,
+      "Yun Huang",
+    );
+    expect(invalidReaction.idea).toBeNull();
+
+    const deletedComment = deleteCommentFromIdeaInState(
+      validComment.state,
+      source.id,
+      commentId,
+      "Yiren Liu",
+    );
+    expect(deletedComment.idea?.comments).toHaveLength(0);
   });
 
   it("allows marketplace authors to comment on open ideas", () => {
@@ -509,10 +826,10 @@ describe("idea store readiness", () => {
       type: "general",
       body: "Outside comment",
     });
-    expect(nonOwnerComment.idea?.comments).toHaveLength(0);
+    expect(nonOwnerComment.idea).toBeNull();
 
     const nonOwnerVote = toggleIdeaUpvoteInState(normalized, source.id, "Yiren Liu");
-    expect(nonOwnerVote.idea?.upvotedBy).toEqual([]);
+    expect(nonOwnerVote.idea).toBeNull();
 
     const ownerVote = toggleIdeaUpvoteInState(normalized, source.id, source.ownerName);
     expect(ownerVote.idea?.upvotedBy).toEqual([source.ownerName]);

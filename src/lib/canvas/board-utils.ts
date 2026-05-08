@@ -7,7 +7,7 @@ import {
   clampZoom,
 } from "./constants";
 import { makeStickyId, randomStickyRotation } from "./ids";
-import type { StickyNote } from "./schema";
+import type { StickyNote, StickyNoteVersion, StickyNoteVersionSource } from "./schema";
 
 export function createStickyId(random: () => number = Math.random): string {
   return makeStickyId(random);
@@ -53,5 +53,43 @@ export function buildStickyNote(input: {
     authorUserId: input.authorUserId,
     authorHandle: input.authorHandle,
     rotation: createStickyRotation(random),
+    versions: [],
+  };
+}
+
+export function buildStickyNoteVersion(input: {
+  noteId: string;
+  text: string;
+  label: string;
+  source: StickyNoteVersionSource;
+  authorHandle: string;
+  ordinal: number;
+  createdAt?: string;
+}): StickyNoteVersion {
+  const createdAt = input.createdAt ?? new Date().toISOString();
+  const timestamp = createdAt.replace(/[^0-9]/g, "");
+  return {
+    id: `${input.noteId}-version-${input.ordinal}-${timestamp}`,
+    text: input.text,
+    label: input.label,
+    source: input.source,
+    authorHandle: input.authorHandle,
+    createdAt,
+  };
+}
+
+export function appendStickyNoteVersion(
+  note: StickyNote,
+  input: Omit<Parameters<typeof buildStickyNoteVersion>[0], "noteId" | "ordinal">,
+): StickyNote {
+  const versions = note.versions ?? [];
+  const version = buildStickyNoteVersion({
+    ...input,
+    noteId: note.id,
+    ordinal: versions.length,
+  });
+  return {
+    ...note,
+    versions: [...versions, version],
   };
 }

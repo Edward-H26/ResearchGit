@@ -1,6 +1,6 @@
 import { IdeaDetailClient } from "@/components/v2/IdeaDetailClient";
 import { auth } from "@/lib/auth";
-import { getAuthorByName } from "@/lib/papers/catalog";
+import { resolvePageAuthor } from "@/lib/auth/author";
 
 type IdeaDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -13,9 +13,7 @@ export default async function IdeaDetailPage({ params, searchParams }: IdeaDetai
   const { id } = await params;
   const query = (await searchParams) ?? {};
   const session = await auth();
-  const author =
-    (query.author ? getAuthorByName(query.author) : null) ??
-    (session?.user?.name ? getAuthorByName(session.user.name) : null);
+  const author = resolvePageAuthor(session, query.author);
 
   return <IdeaDetailClient ideaId={id} viewerName={author?.name ?? null} />;
 }

@@ -1,6 +1,14 @@
 "use client";
 
 import { StickyNotesBoard } from "@/components/canvas";
+import { useDebouncedIdeaNotes } from "@/components/v2/hooks/useDebouncedIdeaNotes";
+import {
+  DraftEnhanceModal,
+  DraftPublishModal,
+  DraftVersionsModal,
+  QUICK_AI_ACTIONS,
+  type QuickAiAction,
+} from "@/components/v2/idea-draft/DraftModals";
 import type { StickyNote } from "@/lib/canvas";
 import {
   type DraftEnhancementPreview,
@@ -21,20 +29,20 @@ import {
   saveIdeaNotes,
   subscribeToIdeaStore,
 } from "@/lib/ideas/client-store";
-import { parseIdeaList } from "@/lib/ideas/fields";
 import { type IdeaFields, type IdeaRecord, ideaRecordToCard } from "@/lib/ideas/store";
 import { getAuthorByName, getPaperById } from "@/lib/papers/catalog";
 import { dashboardHref, ideaHref } from "@/lib/routes";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type IdeaDraftClientProps = {
   ideaId: string;
   authorName: string | null;
 };
 
-const QUICK_AI_ACTIONS = ["Strengthen method", "Sharpen title", "Tighten novelty"] as const;
+const NOTE_SAVE_DEBOUNCE_MS = 500;
+const LOCAL_EDIT_GRACE_MS = 900;
 
 function toIdeaFields(idea: IdeaRecord): IdeaFields {
   const synthesis = synthesizeIdeaFromNotes(ideaRecordToCard(idea), idea.notes);
@@ -57,18 +65,13 @@ export function IdeaDraftClient({ ideaId, authorName }: IdeaDraftClientProps) {
   const [publishFields, setPublishFields] = useState<IdeaFields | null>(null);
   const [isEnhanceOpen, setIsEnhanceOpen] = useState(false);
   const [isVersionsOpen, setIsVersionsOpen] = useState(false);
-  const [quickIntent, setQuickIntent] = useState<(typeof QUICK_AI_ACTIONS)[number]>(
-    QUICK_AI_ACTIONS[0],
-  );
+  const [quickIntent, setQuickIntent] = useState<QuickAiAction>(QUICK_AI_ACTIONS[0]);
   const [customIntent, setCustomIntent] = useState("");
   const [enhancementPreview, setEnhancementPreview] = useState<DraftEnhancementPreview | null>(
     null,
   );
   const [enhancementTrigger, setEnhancementTrigger] =
     useState<IdeaVersionTrigger>("ai_quick_action");
-  const latestNotesRef = useRef<ReadonlyArray<StickyNote>>([]);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const saveInFlightRef = useRef<Promise<IdeaRecord | null> | null>(null);
   const currentIdeaId = idea?.id ?? null;
   const themeLabels =
     themeLabelsVisible && idea
@@ -79,6 +82,44 @@ export function IdeaDraftClient({ ideaId, authorName }: IdeaDraftClientProps) {
           isUngrouped: theme.index === UNGROUPED_THEME_INDEX,
         }))
       : [];
+  const draftPaperContext = useMemo(
+    () =>
+      idea
+        ? idea.groundingPaperIds
+            .map((paperId) => getPaperById(paperId))
+            .filter((paper) => paper !== null)
+        : [],
+    [idea],
+  );
+  const stickyEnhancementContext = useMemo(
+    () => ({
+      relatedPaperTitles: draftPaperContext.map((paper) => paper.title),
+      sourceSummary: idea ? [idea.hypothesis, idea.methodology].join("\n") : undefined,
+    }),
+    [draftPaperContext, idea],
+  );
+  const applyUpdatedNotes = useCallback((updated: IdeaRecord) => {
+    setIdea(updated);
+  }, []);
+  const persistNotes = useCallback(
+    (notes: ReadonlyArray<StickyNote>) => {
+      if (!currentIdeaId) return Promise.resolve(null);
+      return saveIdeaNotes(currentIdeaId, notes, author?.name);
+    },
+    [author?.name, currentIdeaId],
+  );
+  const {
+    latestNotesRef,
+    hasPendingLocalSave,
+    trackRemoteNotes,
+    saveNotes: queueNotesSave,
+    flushPendingSave,
+  } = useDebouncedIdeaNotes({
+    delayMs: NOTE_SAVE_DEBOUNCE_MS,
+    localEditGraceMs: LOCAL_EDIT_GRACE_MS,
+    persist: persistNotes,
+    applyUpdated: applyUpdatedNotes,
+  });
 
   useEffect(() => {
     let canceled = false;
@@ -117,6 +158,7 @@ export function IdeaDraftClient({ ideaId, authorName }: IdeaDraftClientProps) {
 
     void loadDraft();
     const unsubscribe = subscribeToIdeaStore(async () => {
+      if (hasPendingLocalSave()) return;
       const current = await getIdeaById(ideaId);
       if (
         !canceled &&
@@ -124,6 +166,7 @@ export function IdeaDraftClient({ ideaId, authorName }: IdeaDraftClientProps) {
         current.ownerName === author?.name &&
         current.status === "draft"
       ) {
+        trackRemoteNotes(current.notes);
         setIdea(current);
       }
     });
@@ -132,50 +175,23 @@ export function IdeaDraftClient({ ideaId, authorName }: IdeaDraftClientProps) {
       canceled = true;
       unsubscribe();
     };
-  }, [ideaId, author, router]);
+  }, [ideaId, author, hasPendingLocalSave, router, trackRemoteNotes]);
 
   useEffect(() => {
-    if (idea) latestNotesRef.current = idea.notes;
-  }, [idea]);
-
-  useEffect(
-    () => () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    },
-    [],
-  );
-
-  const persistNotes = useCallback(
-    (ideaId: string, notes: ReadonlyArray<StickyNote>) => {
-      const request = saveIdeaNotes(ideaId, notes, author?.name).then((updated) => {
-        if (updated) setIdea(updated);
-        return updated;
-      });
-      const tracked = request.finally(() => {
-        if (saveInFlightRef.current === tracked) saveInFlightRef.current = null;
-      });
-      saveInFlightRef.current = tracked;
-      return tracked;
-    },
-    [author?.name],
-  );
+    if (idea) trackRemoteNotes(idea.notes);
+  }, [idea, trackRemoteNotes]);
 
   const saveNotes = useCallback(
     (notes: ReadonlyArray<StickyNote>) => {
       if (!currentIdeaId) return;
-      latestNotesRef.current = notes;
       setIdea((current) =>
         current?.id === currentIdeaId
           ? { ...current, notes: [...notes], updatedAt: new Date().toISOString() }
           : current,
       );
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => {
-        saveTimerRef.current = null;
-        void persistNotes(currentIdeaId, latestNotesRef.current);
-      }, 250);
+      queueNotesSave(notes);
     },
-    [currentIdeaId, persistNotes],
+    [currentIdeaId, queueNotesSave],
   );
 
   async function suggestThemes() {
@@ -220,11 +236,7 @@ export function IdeaDraftClient({ ideaId, authorName }: IdeaDraftClientProps) {
 
   async function acceptEnhancement() {
     if (!idea || !author || !enhancementPreview) return;
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
-    if (saveInFlightRef.current) await saveInFlightRef.current;
+    await flushPendingSave();
     const updated = await saveDraftVersion(
       idea.id,
       enhancementPreview.fields,
@@ -253,11 +265,7 @@ export function IdeaDraftClient({ ideaId, authorName }: IdeaDraftClientProps) {
 
   async function confirmPublish() {
     if (!idea || !publishFields || !author) return;
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
-    if (saveInFlightRef.current) await saveInFlightRef.current;
+    await flushPendingSave();
     const updated = await publishIdea(idea.id, publishFields, author.name, latestNotesRef.current);
     if (!updated) return;
     router.push(ideaHref(updated.id, updated.status, author.name));
@@ -363,298 +371,47 @@ export function IdeaDraftClient({ ideaId, authorName }: IdeaDraftClientProps) {
           initialNotes={idea.notes}
           themeLabels={themeLabels}
           boardSubtitle="Live shared draft canvas"
+          enhancementContext={stickyEnhancementContext}
           onChange={saveNotes}
         />
       </div>
 
       {isEnhanceOpen ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4 sm:p-5">
-          <section className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[28px] bg-white p-5 shadow-[0_24px_100px_rgba(0,0,0,0.24)] sm:p-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-neutral-500">
-              AI draft assistant
-            </p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
-              Enhance draft with AI
-            </h2>
-            <div className="mt-5 grid gap-5 lg:grid-cols-[0.82fr_1.18fr]">
-              <div className="space-y-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-                    Quick actions
-                  </p>
-                  <div className="mt-3 grid gap-2">
-                    {QUICK_AI_ACTIONS.map((action) => (
-                      <button
-                        key={action}
-                        type="button"
-                        onClick={() => {
-                          setQuickIntent(action);
-                          setCustomIntent("");
-                          setEnhancementPreview(null);
-                        }}
-                        className={`rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition ${
-                          quickIntent === action && customIntent.trim().length === 0
-                            ? "border-neutral-950 bg-neutral-950 text-white"
-                            : "border-neutral-200 bg-white text-neutral-800 hover:border-neutral-950"
-                        }`}
-                      >
-                        {action}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <label className="block">
-                  <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-                    Custom prompt
-                  </span>
-                  <textarea
-                    value={customIntent}
-                    onChange={(event) => {
-                      setCustomIntent(event.target.value);
-                      setEnhancementPreview(null);
-                    }}
-                    rows={5}
-                    placeholder="Tell the AI how to revise this draft"
-                    className="w-full resize-none rounded-2xl border border-neutral-200 px-4 py-3 text-sm outline-none focus:border-neutral-950"
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={generateEnhancementPreview}
-                  className="w-full rounded-full bg-neutral-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800"
-                >
-                  Generate suggestion
-                </button>
-              </div>
-
-              <div className="min-h-[320px] rounded-[24px] border border-neutral-200 bg-[#fcfbf8] p-4">
-                {enhancementPreview ? (
-                  <div>
-                    <h3 className="text-xl font-semibold tracking-tight">Proposed AI version</h3>
-                    <p className="mt-2 text-sm font-semibold text-neutral-600">
-                      {enhancementPreview.summary}
-                    </p>
-                    <div className="mt-4 grid gap-3 text-sm text-neutral-700">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-neutral-500">
-                          Hypothesis
-                        </p>
-                        <p className="mt-1 whitespace-pre-wrap">
-                          {enhancementPreview.fields.hypothesis}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-neutral-500">
-                          Methodology
-                        </p>
-                        <p className="mt-1 line-clamp-6 whitespace-pre-wrap">
-                          {enhancementPreview.fields.methodology}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-neutral-500">
-                          New sticky
-                        </p>
-                        <p className="mt-1 whitespace-pre-wrap">
-                          {enhancementPreview.notes.at(-1)?.text}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mt-5 flex flex-wrap gap-3">
-                      <button
-                        type="button"
-                        onClick={() => void acceptEnhancement()}
-                        className="rounded-full bg-neutral-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800"
-                      >
-                        Accept enhancement
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEnhancementPreview(null)}
-                        className="rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-semibold text-neutral-800 transition hover:border-neutral-950"
-                      >
-                        Reject suggestion
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="grid h-full min-h-[300px] place-items-center rounded-[20px] bg-white p-6 text-center text-sm leading-relaxed text-neutral-500">
-                    Choose a quick action or enter a custom prompt to preview an AI revision before
-                    accepting it into the draft.
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="mt-6">
-              <button
-                type="button"
-                onClick={() => setIsEnhanceOpen(false)}
-                className="rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-semibold text-neutral-800 transition hover:border-neutral-950"
-              >
-                Close
-              </button>
-            </div>
-          </section>
-        </div>
+        <DraftEnhanceModal
+          quickIntent={quickIntent}
+          customIntent={customIntent}
+          enhancementPreview={enhancementPreview}
+          onQuickIntentChange={(intent) => {
+            setQuickIntent(intent);
+            setCustomIntent("");
+            setEnhancementPreview(null);
+          }}
+          onCustomIntentChange={(intent) => {
+            setCustomIntent(intent);
+            setEnhancementPreview(null);
+          }}
+          onGeneratePreview={generateEnhancementPreview}
+          onAcceptEnhancement={() => void acceptEnhancement()}
+          onRejectEnhancement={() => setEnhancementPreview(null)}
+          onClose={() => setIsEnhanceOpen(false)}
+        />
       ) : null}
 
       {isVersionsOpen ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4 sm:p-5">
-          <section className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-[28px] bg-white p-5 shadow-[0_24px_100px_rgba(0,0,0,0.24)] sm:p-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-neutral-500">
-              Draft versions
-            </p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
-              Version history
-            </h2>
-            <div className="mt-5 grid gap-3">
-              {idea.versions.length === 0 ? (
-                <p className="rounded-2xl bg-neutral-50 px-4 py-3 text-sm text-neutral-500">
-                  No saved versions yet.
-                </p>
-              ) : (
-                idea.versions
-                  .slice()
-                  .reverse()
-                  .map((version) => (
-                    <article
-                      key={version.id}
-                      className="rounded-[22px] border border-neutral-200 p-4"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold">{version.summary}</p>
-                          <p className="mt-1 text-xs uppercase tracking-[0.16em] text-neutral-500">
-                            {version.trigger.replaceAll("_", " ")} ·{" "}
-                            {new Date(version.createdAt).toLocaleString()}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => void restoreVersion(version.id)}
-                          className="rounded-full border border-neutral-300 bg-white px-4 py-2 text-xs font-semibold text-neutral-800 transition hover:border-neutral-950"
-                        >
-                          Restore version
-                        </button>
-                      </div>
-                      <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-neutral-600">
-                        {version.fields.methodology}
-                      </p>
-                    </article>
-                  ))
-              )}
-            </div>
-            <div className="mt-6">
-              <button
-                type="button"
-                onClick={() => setIsVersionsOpen(false)}
-                className="rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-semibold text-neutral-800 transition hover:border-neutral-950"
-              >
-                Close
-              </button>
-            </div>
-          </section>
-        </div>
+        <DraftVersionsModal
+          idea={idea}
+          onRestoreVersion={(versionId) => void restoreVersion(versionId)}
+          onClose={() => setIsVersionsOpen(false)}
+        />
       ) : null}
 
       {publishFields ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4 sm:p-5">
-          <section className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-[28px] bg-white p-5 shadow-[0_24px_100px_rgba(0,0,0,0.24)] sm:p-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-neutral-500">
-              Publish modal
-            </p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
-              Review synthesis
-            </h2>
-            <div className="mt-5 grid gap-4">
-              <label className="block">
-                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-                  Title
-                </span>
-                <input
-                  value={publishFields.title}
-                  onChange={(event) =>
-                    setPublishFields({ ...publishFields, title: event.target.value })
-                  }
-                  className="w-full rounded-2xl border border-neutral-200 px-4 py-3 text-sm outline-none focus:border-neutral-950"
-                />
-              </label>
-              <label className="block">
-                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-                  Hypothesis
-                </span>
-                <textarea
-                  value={publishFields.hypothesis}
-                  onChange={(event) =>
-                    setPublishFields({ ...publishFields, hypothesis: event.target.value })
-                  }
-                  rows={4}
-                  className="w-full resize-none rounded-2xl border border-neutral-200 px-4 py-3 text-sm outline-none focus:border-neutral-950"
-                />
-              </label>
-              <label className="block">
-                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-                  Methodology
-                </span>
-                <textarea
-                  value={publishFields.methodology}
-                  onChange={(event) =>
-                    setPublishFields({ ...publishFields, methodology: event.target.value })
-                  }
-                  rows={7}
-                  className="w-full resize-none rounded-2xl border border-neutral-200 px-4 py-3 text-sm outline-none focus:border-neutral-950"
-                />
-              </label>
-              <label className="block">
-                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-                  Novelty
-                </span>
-                <textarea
-                  value={publishFields.novelty.join("\n")}
-                  onChange={(event) =>
-                    setPublishFields({
-                      ...publishFields,
-                      novelty: parseIdeaList(event.target.value),
-                    })
-                  }
-                  rows={4}
-                  className="w-full resize-none rounded-2xl border border-neutral-200 px-4 py-3 text-sm outline-none focus:border-neutral-950"
-                />
-              </label>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-                  Grounding
-                </p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {publishFields.citations.map((citation) => (
-                    <span
-                      key={citation}
-                      className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-600"
-                    >
-                      {citation}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="mt-6 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={() => void confirmPublish()}
-                className="rounded-full bg-neutral-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800"
-              >
-                Publish
-              </button>
-              <button
-                type="button"
-                onClick={() => setPublishFields(null)}
-                className="rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-semibold text-neutral-800 transition hover:border-neutral-950"
-              >
-                Cancel
-              </button>
-            </div>
-          </section>
-        </div>
+        <DraftPublishModal
+          fields={publishFields}
+          onFieldsChange={setPublishFields}
+          onConfirm={() => void confirmPublish()}
+          onClose={() => setPublishFields(null)}
+        />
       ) : null}
     </main>
   );

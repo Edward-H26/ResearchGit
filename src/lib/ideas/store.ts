@@ -1,15 +1,20 @@
-import type { StickyNote } from "@/lib/canvas";
+import type { StickyNote, StickyNoteVersion, StickyNoteVersionSource } from "@/lib/canvas";
 import {
   type IdeaCard,
+  TOPIC_IDEA_CARD_PREFIX,
+  type TopicIdeaCardScope,
   applyThemesToNotes,
   buildDraftNotes,
   generateIdeaCards,
+  parseTopicIdeaCardId,
   synthesizeIdeaFromNotes,
 } from "@/lib/ideas";
 import { getAuthorByName } from "@/lib/papers/catalog";
+import { getCatalogTopicById } from "@/lib/recommendation";
 
 export const STORE_VERSION = 8;
 const CATALOG_MARKETPLACE_AUTHOR_NAMES = ["Yun Huang", "Yiren Liu", "Hyanghee Park"] as const;
+const STICKY_NOTE_VERSION_SOURCES = ["manual", "ai_enhancement", "restore"] as const;
 
 export const COMMENT_TYPES = [
   "general",
@@ -81,6 +86,7 @@ export type IdeaStoreState = {
   ideas: IdeaRecord[];
   onboardingCompleteByAuthor: Record<string, boolean>;
   topicRecommendationCountByAuthor: Record<string, number>;
+  joinedTopicIdsByAuthor: Record<string, string[]>;
 };
 
 export type IdeaMutationResult = {
@@ -129,6 +135,23 @@ export function dedupeIdeasByOwnerAndCard(ideas: ReadonlyArray<IdeaRecord>): Ide
   return ideas.filter((idea) => preferredByCard.get(ideaCardKey(idea))?.id === idea.id);
 }
 
+export function isIdeaVisibleToViewer(idea: IdeaRecord, viewerName?: string | null): boolean {
+  const matchedViewerName = matchedAuthorName(viewerName ?? undefined);
+  if (idea.status === "draft") return matchedViewerName === idea.ownerName;
+  if (isPrivateIdea(idea)) return matchedViewerName === idea.ownerName;
+  return true;
+}
+
+export function getVisibleIdeaStoreState(
+  state: IdeaStoreState,
+  viewerName?: string | null,
+): IdeaStoreState {
+  return {
+    ...state,
+    ideas: state.ideas.filter((idea) => isIdeaVisibleToViewer(idea, viewerName)),
+  };
+}
+
 function emptyReactions(): ReactionMap {
   return {
     "👍": [],
@@ -151,14 +174,102 @@ function cloneReactions(reactions: ReactionMap): ReactionMap {
   };
 }
 
+function isStickyNoteVersionSource(value: unknown): value is StickyNoteVersionSource {
+  return STICKY_NOTE_VERSION_SOURCES.includes(value as StickyNoteVersionSource);
+}
+
+function normalizeStickyNoteVersion(
+  noteId: string,
+  value: unknown,
+  index: number,
+): StickyNoteVersion | null {
+  if (typeof value !== "object" || value === null) return null;
+  const version = value as Partial<StickyNoteVersion>;
+  return {
+    id:
+      typeof version.id === "string" && version.id.trim()
+        ? version.id
+        : `${noteId}-version-${index}`,
+    text: typeof version.text === "string" ? version.text : "",
+    label:
+      typeof version.label === "string" && version.label.trim()
+        ? version.label
+        : `Version ${index + 1}`,
+    source: isStickyNoteVersionSource(version.source) ? version.source : "manual",
+    authorHandle: typeof version.authorHandle === "string" ? version.authorHandle : "",
+    createdAt: typeof version.createdAt === "string" ? version.createdAt : nowIso(),
+  };
+}
+
+function normalizeStickyNote(note: StickyNote): StickyNote {
+  const legacyNote = note as StickyNote & { versions?: unknown };
+  const versions = Array.isArray(legacyNote.versions)
+    ? legacyNote.versions
+        .map((version, index) => normalizeStickyNoteVersion(note.id, version, index))
+        .filter((version): version is StickyNoteVersion => Boolean(version))
+    : [];
+  return {
+    ...note,
+    versions,
+  };
+}
+
+function isCommentType(value: unknown): value is CommentType {
+  return COMMENT_TYPES.includes(value as CommentType);
+}
+
+function isReactionKind(value: unknown): value is ReactionKind {
+  return REACTION_KINDS.includes(value as ReactionKind);
+}
+
+function matchedAuthorName(value: string | undefined): string | null {
+  return value ? (getAuthorByName(value)?.name ?? null) : null;
+}
+
+function topicScopeFromCard(card: Pick<IdeaCard, "id">): TopicIdeaCardScope | null {
+  const parsed = parseTopicIdeaCardId(card.id);
+  if (!parsed) return null;
+  const topic = getCatalogTopicById(parsed.topicId);
+  if (!topic) return null;
+  if (parsed.paperId && !topic.papers.some((paper) => paper.id === parsed.paperId)) return null;
+  return parsed.kind === "paper"
+    ? { kind: "paper", topicId: topic.id, paperId: parsed.paperId }
+    : { kind: "topic", topicId: topic.id, paperId: null };
+}
+
+function normalizeJoinedTopicIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const topicId of value) {
+    if (typeof topicId !== "string") continue;
+    const trimmedTopicId = topicId.trim();
+    if (!trimmedTopicId || seen.has(trimmedTopicId) || !getCatalogTopicById(trimmedTopicId)) {
+      continue;
+    }
+    seen.add(trimmedTopicId);
+    normalized.push(trimmedTopicId);
+  }
+  return normalized;
+}
+
 function isPrivateIdea(idea: IdeaRecord): boolean {
   return idea.status === "locked";
 }
 
+export function isTopicCanvasIdea(idea: Pick<IdeaRecord, "cardId">): boolean {
+  return idea.cardId.startsWith(TOPIC_IDEA_CARD_PREFIX);
+}
+
+function canActorEditNotes(idea: IdeaRecord, actorName: string | undefined): boolean {
+  return isTopicCanvasIdea(idea) || idea.ownerName === actorName;
+}
+
 function shouldRefreshPaperGrounding(
-  idea: Pick<IdeaRecord, "groundingPaperIds" | "methodology" | "title">,
+  idea: Pick<IdeaRecord, "cardId" | "groundingPaperIds" | "methodology" | "title">,
 ): boolean {
   return (
+    !isTopicCanvasIdea(idea) &&
     idea.groundingPaperIds.length > 0 &&
     (idea.title.startsWith("From ") ||
       !idea.methodology.includes("Source paper:") ||
@@ -226,10 +337,46 @@ function buildIdeaRecord(
   };
 }
 
+function buildTopicIdeaRecord(card: IdeaCard, id: string, createdAt: string): IdeaRecord {
+  const fields: IdeaFields = {
+    title: card.title,
+    hypothesis: card.hypothesis,
+    methodology: card.methodSketch,
+    novelty: card.novelty,
+    citations: card.groundingPaperIds,
+  };
+
+  return {
+    id,
+    cardId: card.id,
+    ownerName: "ResearchGit",
+    status: "open",
+    groundingPaperIds: card.groundingPaperIds,
+    notes: [],
+    comments: [],
+    versions: [],
+    upvotedBy: [],
+    createdAt,
+    updatedAt: createdAt,
+    ...fields,
+  };
+}
+
 export function normalizeIdeaStoreState(state: IdeaStoreState): IdeaStoreState {
+  const legacyState = state as IdeaStoreState & {
+    joinedTopicIdsByAuthor?: Record<string, unknown>;
+  };
+  const joinedTopicIdsByAuthor = Object.fromEntries(
+    Object.entries(legacyState.joinedTopicIdsByAuthor ?? {}).map(([authorKey, topicIds]) => [
+      authorKey,
+      normalizeJoinedTopicIds(topicIds),
+    ]),
+  );
+
   return {
     ...state,
     topicRecommendationCountByAuthor: state.topicRecommendationCountByAuthor ?? {},
+    joinedTopicIdsByAuthor,
     ideas: state.ideas.map((idea) => {
       const {
         lockedAt: _lockedAt,
@@ -268,16 +415,19 @@ export function normalizeIdeaStoreState(state: IdeaStoreState): IdeaStoreState {
           ...versionRest,
           trigger: isIdeaVersionTrigger(trigger) ? trigger : "manual",
           summary: typeof summary === "string" ? summary : `Version ${versionRest.ord}`,
-          notes: Array.isArray(notes) ? (notes as StickyNote[]) : rest.notes,
+          notes: Array.isArray(notes)
+            ? (notes as StickyNote[]).map(normalizeStickyNote)
+            : rest.notes.map(normalizeStickyNote),
         };
       });
       const sourceCard =
         status !== "draft" && shouldRefreshPaperGrounding(rest)
           ? generateIdeaCards(rest.groundingPaperIds, rest.ownerName)[0]
           : null;
-      const notes = rest.notes.some((note) => note.themeIndex !== null && note.width < 300)
-        ? applyThemesToNotes(rest.notes)
-        : rest.notes;
+      const normalizedNotes = rest.notes.map(normalizeStickyNote);
+      const notes = normalizedNotes.some((note) => note.themeIndex !== null && note.width < 300)
+        ? applyThemesToNotes(normalizedNotes)
+        : normalizedNotes;
       const refreshedFields = sourceCard ? synthesizeIdeaFromNotes(sourceCard, notes) : null;
       const refreshedVersions =
         refreshedFields && versions.length > 0
@@ -287,7 +437,10 @@ export function normalizeIdeaStoreState(state: IdeaStoreState): IdeaStoreState {
           : versions;
       return {
         ...rest,
-        comments,
+        comments: comments.map((comment) => ({
+          ...comment,
+          type: isCommentType(comment.type) ? comment.type : "general",
+        })),
         notes,
         versions: refreshedVersions,
         ...(refreshedFields ?? {}),
@@ -324,6 +477,7 @@ export function initialIdeaStoreState(): IdeaStoreState {
     }),
     onboardingCompleteByAuthor: {},
     topicRecommendationCountByAuthor: {},
+    joinedTopicIdsByAuthor: {},
   };
 }
 
@@ -401,20 +555,71 @@ export function createIdeaFromCardInState(
   card: IdeaCard,
   authorName: string,
 ): IdeaMutationResult {
+  const author = getAuthorByName(authorName);
+  if (!author) return { state, idea: null };
+
   const existingDraft = state.ideas.find(
-    (idea) => idea.cardId === card.id && idea.ownerName === authorName && idea.status === "draft",
+    (idea) => idea.cardId === card.id && idea.ownerName === author.name && idea.status === "draft",
   );
   if (existingDraft) return { state, idea: existingDraft };
 
   const existingIdea = preferredIdeaForCard(
-    state.ideas.filter((idea) => idea.cardId === card.id && idea.ownerName === authorName),
+    state.ideas.filter((idea) => idea.cardId === card.id && idea.ownerName === author.name),
   );
   if (existingIdea) return { state, idea: existingIdea };
 
-  const id = `idea-${slugify(authorName)}-${card.id}-${Date.now().toString(36)}`;
-  const authorUserId = getAuthorByName(authorName)?.id ?? slugify(authorName);
-  const idea = buildIdeaRecord(card, authorName, authorUserId, id, nowIso());
+  const id = `idea-${slugify(author.name)}-${card.id}-${Date.now().toString(36)}`;
+  const idea = buildIdeaRecord(card, author.name, author.id, id, nowIso());
   return { state: { ...state, ideas: [idea, ...state.ideas] }, idea };
+}
+
+export function createTopicIdeaFromCardInState(
+  state: IdeaStoreState,
+  card: IdeaCard,
+  actorName: string,
+): IdeaMutationResult {
+  const actor = getAuthorByName(actorName);
+  if (!actor) return { state, idea: null };
+  const scope = topicScopeFromCard(card);
+  if (!scope) return { state, idea: null };
+
+  const scopedState =
+    scope.kind === "topic"
+      ? joinTopicForAuthorInState(state, actor.normalizedName, scope.topicId)
+      : state;
+
+  const existingIdea = preferredIdeaForCard(
+    scopedState.ideas.filter((idea) => idea.cardId === card.id && isTopicCanvasIdea(idea)),
+  );
+  if (existingIdea) return { state: scopedState, idea: existingIdea };
+
+  const createdAt = nowIso();
+  const idScope =
+    scope.kind === "paper" ? `${scope.topicId}-paper-${scope.paperId}` : scope.topicId;
+  const id = `idea-topic-${idScope}-${Date.now().toString(36)}`;
+  const idea = buildTopicIdeaRecord(card, id, createdAt);
+  return { state: { ...scopedState, ideas: [idea, ...scopedState.ideas] }, idea };
+}
+
+export function joinTopicForAuthorInState(
+  state: IdeaStoreState,
+  normalizedAuthorName: string,
+  topicId: string,
+): IdeaStoreState {
+  const authorKey = normalizedAuthorName.trim();
+  const topic = getCatalogTopicById(topicId);
+  if (!authorKey || !topic) return state;
+
+  const currentTopicIds = state.joinedTopicIdsByAuthor[authorKey] ?? [];
+  if (currentTopicIds.includes(topic.id)) return state;
+
+  return {
+    ...state,
+    joinedTopicIdsByAuthor: {
+      ...state.joinedTopicIdsByAuthor,
+      [authorKey]: [...currentTopicIds, topic.id],
+    },
+  };
 }
 
 export function saveIdeaNotesInState(
@@ -423,7 +628,13 @@ export function saveIdeaNotesInState(
   notes: ReadonlyArray<StickyNote>,
   actorName?: string,
 ): IdeaMutationResult {
-  return updateOwnerIdeaInState(state, id, actorName, (idea) => {
+  if (!matchedAuthorName(actorName)) return { state, idea: null };
+  const existing = state.ideas.find((idea) => idea.id === id);
+  if (!existing || !canActorEditNotes(existing, actorName)) {
+    return { state, idea: null };
+  }
+
+  return updateIdeaInState(state, id, (idea) => {
     return {
       ...idea,
       notes: [...notes],
@@ -547,9 +758,20 @@ export function addCommentToIdeaInState(
     parentCommentId?: string | null;
   },
 ): IdeaMutationResult {
-  return updateIdeaInState(state, input.ideaId, (idea) => {
-    if (isPrivateIdea(idea) && input.authorName !== idea.ownerName) return idea;
+  const authorName = matchedAuthorName(input.authorName);
+  if (!authorName || !isCommentType(input.type) || input.body.trim().length === 0) {
+    return { state, idea: null };
+  }
+  const existing = state.ideas.find((idea) => idea.id === input.ideaId);
+  if (!existing) return { state, idea: null };
+  if (
+    (existing.status === "draft" || isPrivateIdea(existing)) &&
+    authorName !== existing.ownerName
+  ) {
+    return { state, idea: null };
+  }
 
+  return updateIdeaInState(state, input.ideaId, (idea) => {
     const parent = input.parentCommentId
       ? idea.comments.find((comment) => comment.id === input.parentCommentId)
       : null;
@@ -558,7 +780,7 @@ export function addCommentToIdeaInState(
     const comment: IdeaCommentRecord = {
       id: `${idea.id}-comment-${createdAt.replace(/[^0-9]/g, "")}-${idea.comments.length + 1}`,
       ideaId: idea.id,
-      authorName: input.authorName,
+      authorName,
       type: input.type,
       body: input.body.trim().slice(0, 2000),
       parentCommentId,
@@ -575,21 +797,66 @@ export function addCommentToIdeaInState(
   });
 }
 
+export function deleteCommentFromIdeaInState(
+  state: IdeaStoreState,
+  ideaId: string,
+  commentId: string,
+  actorName: string,
+): IdeaMutationResult {
+  const matchedName = matchedAuthorName(actorName);
+  if (!matchedName) return { state, idea: null };
+  const existing = state.ideas.find((idea) => idea.id === ideaId);
+  if (!existing) return { state, idea: null };
+  const comment = existing.comments.find((candidate) => candidate.id === commentId);
+  if (!comment || (comment.authorName !== matchedName && existing.ownerName !== matchedName)) {
+    return { state, idea: null };
+  }
+  if (
+    (existing.status === "draft" || isPrivateIdea(existing)) &&
+    matchedName !== existing.ownerName
+  ) {
+    return { state, idea: null };
+  }
+
+  return updateIdeaInState(state, ideaId, (idea) => {
+    const deletedCommentIds = new Set(
+      idea.comments
+        .filter(
+          (candidate) => candidate.id === commentId || candidate.parentCommentId === commentId,
+        )
+        .map((candidate) => candidate.id),
+    );
+    return {
+      ...idea,
+      comments: idea.comments.filter((candidate) => !deletedCommentIds.has(candidate.id)),
+      updatedAt: nowIso(),
+    };
+  });
+}
+
 export function toggleIdeaUpvoteInState(
   state: IdeaStoreState,
   id: string,
   authorName: string,
 ): IdeaMutationResult {
+  const matchedName = matchedAuthorName(authorName);
+  if (!matchedName) return { state, idea: null };
+  const existing = state.ideas.find((idea) => idea.id === id);
+  if (!existing) return { state, idea: null };
+  if (
+    existing.status === "draft" ||
+    (isPrivateIdea(existing) && matchedName !== existing.ownerName)
+  ) {
+    return { state, idea: null };
+  }
+
   return updateIdeaInState(state, id, (idea) => {
-    if (idea.status === "draft" || (isPrivateIdea(idea) && authorName !== idea.ownerName)) {
-      return idea;
-    }
-    const hasVote = idea.upvotedBy.includes(authorName);
+    const hasVote = idea.upvotedBy.includes(matchedName);
     return {
       ...idea,
       upvotedBy: hasVote
-        ? idea.upvotedBy.filter((name) => name !== authorName)
-        : [...idea.upvotedBy, authorName],
+        ? idea.upvotedBy.filter((name) => name !== matchedName)
+        : [...idea.upvotedBy, matchedName],
       updatedAt: nowIso(),
     };
   });
@@ -602,18 +869,27 @@ export function toggleCommentReactionInState(
   kind: ReactionKind,
   authorName: string,
 ): IdeaMutationResult {
-  return updateIdeaInState(state, ideaId, (idea) => {
-    if (isPrivateIdea(idea) && authorName !== idea.ownerName) return idea;
+  const matchedName = matchedAuthorName(authorName);
+  if (!matchedName || !isReactionKind(kind)) return { state, idea: null };
+  const existing = state.ideas.find((idea) => idea.id === ideaId);
+  if (!existing) return { state, idea: null };
+  if (
+    (existing.status === "draft" || isPrivateIdea(existing)) &&
+    matchedName !== existing.ownerName
+  ) {
+    return { state, idea: null };
+  }
 
+  return updateIdeaInState(state, ideaId, (idea) => {
     return {
       ...idea,
       comments: idea.comments.map((comment) => {
         if (comment.id !== commentId) return comment;
         const reactions = cloneReactions(comment.reactions);
         const existing = reactions[kind];
-        reactions[kind] = existing.includes(authorName)
-          ? existing.filter((name) => name !== authorName)
-          : [...existing, authorName];
+        reactions[kind] = existing.includes(matchedName)
+          ? existing.filter((name) => name !== matchedName)
+          : [...existing, matchedName];
         return { ...comment, reactions };
       }),
       updatedAt: nowIso(),
@@ -649,6 +925,23 @@ export function saveTopicRecommendationCountInState(
         ...state.topicRecommendationCountByAuthor,
         [authorKey]: Math.max(0, Math.floor(visibleTopicCount)),
       },
+    },
+    idea: null,
+  };
+}
+
+export function clearJoinedTopicsForAuthorInState(
+  state: IdeaStoreState,
+  normalizedAuthorName: string,
+): IdeaMutationResult {
+  const authorKey = normalizedAuthorName.trim();
+  if (!authorKey) return { state, idea: null };
+  const { [authorKey]: _removedTopicIds, ...joinedTopicIdsByAuthor } = state.joinedTopicIdsByAuthor;
+
+  return {
+    state: {
+      ...state,
+      joinedTopicIdsByAuthor,
     },
     idea: null,
   };

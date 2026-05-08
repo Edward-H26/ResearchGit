@@ -1,9 +1,7 @@
 "use client";
 
 import {
-  type CommentType,
   type IdeaRecord,
-  addCommentToIdea,
   dedupeIdeasByOwnerAndCard,
   getAllIdeas,
   subscribeToIdeaStore,
@@ -19,17 +17,12 @@ type MarketplaceClientProps = {
 
 type FilterMode = "all" | "open";
 type SortMode = "new" | "most-up" | "most-comment";
-type FeedbackMode = "sticky" | "comment";
-
-const FEEDBACK_COLORS = ["bg-[#FCE3DB]", "bg-[#FBE7C6]", "bg-[#F2F2C5]", "bg-[#D8EFE0]"] as const;
 
 export function MarketplaceClient({ viewerName }: MarketplaceClientProps) {
   const viewer = viewerName ?? "";
   const [filter, setFilter] = useState<FilterMode>("all");
   const [sort, setSort] = useState<SortMode>("new");
   const [ideas, setIdeas] = useState<IdeaRecord[]>([]);
-  const [selectedIdeaId, setSelectedIdeaId] = useState<string | null>(null);
-  const [feedbackBody, setFeedbackBody] = useState("");
 
   useEffect(() => {
     let canceled = false;
@@ -56,46 +49,11 @@ export function MarketplaceClient({ viewerName }: MarketplaceClientProps) {
       return b.updatedAt.localeCompare(a.updatedAt);
     });
   }, [filter, ideas, sort]);
-  const defaultSelectedIdeaId = visibleIdeas[0]?.id ?? null;
-  const selectedIdea =
-    visibleIdeas.find((idea) => idea.id === selectedIdeaId) ??
-    visibleIdeas.find((idea) => idea.id === defaultSelectedIdeaId) ??
-    null;
-
-  useEffect(() => {
-    if (visibleIdeas.length === 0) {
-      setSelectedIdeaId(null);
-      return;
-    }
-    const selectedVisibleIdea = visibleIdeas.find((idea) => idea.id === selectedIdeaId);
-    if (!selectedVisibleIdea) {
-      setSelectedIdeaId(defaultSelectedIdeaId);
-    }
-  }, [defaultSelectedIdeaId, selectedIdeaId, visibleIdeas]);
-
-  function selectIdeaForFeedback(idea: IdeaRecord) {
-    setSelectedIdeaId(idea.id);
-  }
 
   async function upvote(id: string) {
     const updated = await toggleIdeaUpvote(id, viewer);
     if (!updated) return;
     setIdeas((current) => current.map((idea) => (idea.id === id ? updated : idea)));
-  }
-
-  async function submitFeedback(mode: FeedbackMode) {
-    if (!selectedIdea || feedbackBody.trim().length === 0) return;
-    const type: CommentType = mode === "sticky" ? "experiment_idea" : "general";
-    const updated = await addCommentToIdea({
-      ideaId: selectedIdea.id,
-      authorName: viewer,
-      type,
-      body: feedbackBody,
-    });
-    if (!updated) return;
-    setIdeas((current) => current.map((idea) => (idea.id === updated.id ? updated : idea)));
-    setSelectedIdeaId(updated.id);
-    setFeedbackBody("");
   }
 
   if (!viewerName) {
@@ -125,11 +83,9 @@ export function MarketplaceClient({ viewerName }: MarketplaceClientProps) {
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-neutral-500">
               Marketplace
             </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
-              Marketplace feedback canvas
-            </h1>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Marketplace</h1>
             <p className="mt-2 text-sm leading-relaxed text-neutral-600">
-              Use the shared marketplace canvas to upvote, add comments, or leave sticky feedback.
+              Browse public ideas, upvote promising directions, and open a detail page to comment.
             </p>
           </div>
           <Link
@@ -181,7 +137,7 @@ export function MarketplaceClient({ viewerName }: MarketplaceClientProps) {
           </div>
         </section>
 
-        <section className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <section className="mt-6">
           <div className="rounded-[28px] border border-black/5 bg-white p-4 shadow-[0_24px_80px_rgba(57,44,18,0.08)]">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -207,22 +163,15 @@ export function MarketplaceClient({ viewerName }: MarketplaceClientProps) {
               >
                 {visibleIdeas.map((idea) => {
                   const voted = idea.upvotedBy.includes(viewer);
-                  const isSelected = selectedIdea?.id === idea.id;
                   return (
                     <article
                       key={idea.id}
                       data-marketplace-sticky="true"
-                      onMouseEnter={() => selectIdeaForFeedback(idea)}
-                      className={`relative flex min-h-[216px] min-w-0 flex-col overflow-hidden rounded-[24px] border p-4 shadow-xl transition ${
-                        isSelected
-                          ? "border-neutral-950 bg-[#FFF7E6] ring-2 ring-neutral-950"
-                          : "border-black/10 bg-[#FFF7E6] hover:ring-2 hover:ring-neutral-400/70"
-                      }`}
+                      className="relative flex min-h-[216px] min-w-0 flex-col overflow-hidden rounded-[24px] border border-black/10 bg-[#FFF7E6] p-4 shadow-xl transition hover:ring-2 hover:ring-neutral-400/70"
                     >
                       <Link
                         href={ideaDetailHref(idea.id, idea.status, viewer)}
                         aria-label={`Open ${idea.title}`}
-                        onFocus={() => selectIdeaForFeedback(idea)}
                         className="absolute inset-0 z-0 rounded-[24px] focus:outline-none focus:ring-2 focus:ring-neutral-400/70"
                       />
                       <div className="pointer-events-none relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden text-left">
@@ -285,88 +234,6 @@ export function MarketplaceClient({ viewerName }: MarketplaceClientProps) {
               </div>
             </div>
           </div>
-
-          <aside className="rounded-[28px] border border-black/5 bg-white p-5 shadow-[0_24px_80px_rgba(57,44,18,0.08)]">
-            {selectedIdea ? (
-              <div className="flex h-full min-h-[440px] flex-col sm:min-h-[640px]">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-neutral-500">
-                      Feedback canvas
-                    </p>
-                    <h2 className="mt-2 line-clamp-2 text-xl font-semibold tracking-tight">
-                      {selectedIdea.title}
-                    </h2>
-                  </div>
-                  <Link
-                    href={ideaDetailHref(selectedIdea.id, selectedIdea.status, viewer)}
-                    className="shrink-0 rounded-full bg-neutral-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-neutral-800"
-                  >
-                    Open detail
-                  </Link>
-                </div>
-
-                <div className="mt-4 grid gap-3">
-                  <textarea
-                    value={feedbackBody}
-                    onChange={(event) => setFeedbackBody(event.target.value)}
-                    maxLength={2000}
-                    rows={4}
-                    placeholder="Add a marketplace sticky note"
-                    className="w-full resize-none rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-sm outline-none focus:border-neutral-950"
-                  />
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      onClick={() => void submitFeedback("sticky")}
-                      disabled={feedbackBody.trim().length === 0}
-                      className="rounded-full bg-neutral-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-neutral-800 disabled:bg-neutral-300"
-                    >
-                      Add sticky note
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void submitFeedback("comment")}
-                      disabled={feedbackBody.trim().length === 0}
-                      className="rounded-full border border-neutral-300 bg-white px-4 py-2 text-sm font-semibold text-neutral-800 transition hover:border-neutral-950 disabled:text-neutral-300"
-                    >
-                      Post comment
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mt-5 min-h-0 flex-1 space-y-3 overflow-y-auto">
-                  {selectedIdea.comments
-                    .filter((comment) => comment.parentCommentId === null)
-                    .slice()
-                    .reverse()
-                    .map((comment, index) => (
-                      <article
-                        key={comment.id}
-                        data-feedback-sticky="true"
-                        className={`rounded-[22px] border border-black/10 p-4 shadow-lg ${
-                          FEEDBACK_COLORS[index % FEEDBACK_COLORS.length]
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <p className="text-sm font-semibold">{comment.authorName}</p>
-                          <span className="rounded-full bg-white/60 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-700">
-                            {comment.type === "experiment_idea" ? "Sticky" : "Comment"}
-                          </span>
-                        </div>
-                        <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-neutral-800">
-                          {comment.body}
-                        </p>
-                      </article>
-                    ))}
-                </div>
-              </div>
-            ) : (
-              <div className="grid min-h-[440px] place-items-center rounded-[24px] bg-neutral-50 p-6 text-center text-sm text-neutral-500 sm:min-h-[640px]">
-                Select an idea sticky to add marketplace feedback.
-              </div>
-            )}
-          </aside>
         </section>
 
         {visibleIdeas.length === 0 ? (

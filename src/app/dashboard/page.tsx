@@ -1,6 +1,6 @@
 import { DashboardClient } from "@/components/v2/DashboardClient";
 import { auth } from "@/lib/auth";
-import { getAuthorByName } from "@/lib/papers/catalog";
+import { resolvePageAuthor } from "@/lib/auth/author";
 import { getOnboardingCompleted } from "@/server/user-service";
 
 type DashboardPageProps = {
@@ -13,10 +13,7 @@ type DashboardPageProps = {
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
   const params = (await searchParams) ?? {};
   const session = await auth();
-  const author =
-    (params.author ? getAuthorByName(params.author) : null) ??
-    (session?.user?.matchedAuthorName ? getAuthorByName(session.user.matchedAuthorName) : null) ??
-    (session?.user?.name ? getAuthorByName(session.user.name) : null);
+  const author = resolvePageAuthor(session, params.author);
   const onboardingCompleted = session?.user?.id
     ? await getOnboardingCompleted(session.user.id)
     : false;

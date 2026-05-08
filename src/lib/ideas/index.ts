@@ -1,7 +1,7 @@
 import { type StickyNote, buildStickyNote } from "@/lib/canvas";
 import type { ThemeColorToken } from "@/lib/canvas/theme-styles";
 import { type CatalogPaper, getPaperById } from "@/lib/papers/catalog";
-import { recommendPapersForAuthor } from "@/lib/recommendation";
+import { type CatalogTopic, recommendPapersForAuthor } from "@/lib/recommendation";
 
 export type IdeaCard = {
   id: string;
@@ -11,6 +11,13 @@ export type IdeaCard = {
   novelty: string[];
   groundingPaperIds: string[];
 };
+
+export const TOPIC_IDEA_CARD_PREFIX = "topic-";
+export const TOPIC_PAPER_CARD_SEPARATOR = "--paper-";
+
+export type TopicIdeaCardScope =
+  | { kind: "topic"; topicId: string; paperId: null }
+  | { kind: "paper"; topicId: string; paperId: string };
 
 export type ThemeCluster = {
   index: number;
@@ -174,6 +181,56 @@ export function generateIdeaCards(selectedPaperIds: string[], authorName: string
       groundingPaperIds: [paper.id],
     };
   });
+}
+
+export function buildTopicIdeaCard(topic: CatalogTopic): IdeaCard {
+  const paperCount = topic.papers.length;
+  const topicKeywords = topic.keywordProfile.slice(0, 3);
+  const keywordText =
+    topicKeywords.length > 0 ? topicKeywords.join(", ") : "shared CHI 2026 questions";
+  return {
+    id: `${TOPIC_IDEA_CARD_PREFIX}${topic.id}`,
+    title: `${topic.label}: shared CHI 2026 topic canvas`,
+    hypothesis: `If researchers work from the same CHI 2026 topic group, "${topic.label}", they can surface convergent directions, tensions, and proposal opportunities across ${paperCount} paper(s).`,
+    methodSketch: `Topic source: ${topic.source}\nShared anchor: ${paperCount} CHI 2026 paper(s)\nTopic signals: ${keywordText}\nUse the canvas to collect asynchronous sticky notes, then synthesize directions and next steps from the accumulated discussion.`,
+    novelty: [
+      `Turns the CHI 2026 topic group "${topic.label}" into a shared public workspace rather than a single-paper draft.`,
+      `Keeps discussion grounded in ${paperCount} same-topic paper record(s) from papers_by_room.json.`,
+      "Supports community-level synthesis from sticky notes, paper anchors, and comments.",
+    ],
+    groundingPaperIds: topic.papers.map((paper) => paper.id),
+  };
+}
+
+export function parseTopicIdeaCardId(cardId: string): TopicIdeaCardScope | null {
+  if (!cardId.startsWith(TOPIC_IDEA_CARD_PREFIX)) return null;
+  const scopedId = cardId.slice(TOPIC_IDEA_CARD_PREFIX.length);
+  const separatorIndex = scopedId.indexOf(TOPIC_PAPER_CARD_SEPARATOR);
+  if (separatorIndex < 0) {
+    return scopedId ? { kind: "topic", topicId: scopedId, paperId: null } : null;
+  }
+  const topicId = scopedId.slice(0, separatorIndex);
+  const paperId = scopedId.slice(separatorIndex + TOPIC_PAPER_CARD_SEPARATOR.length);
+  if (!topicId || !paperId) return null;
+  return { kind: "paper", topicId, paperId };
+}
+
+export function buildTopicPaperIdeaCard(topic: CatalogTopic, paper: CatalogPaper): IdeaCard {
+  const topicKeywords = topic.keywordProfile.slice(0, 3);
+  const keywordText =
+    topicKeywords.length > 0 ? topicKeywords.join(", ") : "shared CHI 2026 questions";
+  return {
+    id: `${TOPIC_IDEA_CARD_PREFIX}${topic.id}${TOPIC_PAPER_CARD_SEPARATOR}${paper.id}`,
+    title: `${paper.title}: paper canvas for ${topic.label}`,
+    hypothesis: `If researchers inspect "${paper.title}" inside the broader CHI 2026 topic "${topic.label}", they can develop paper-specific directions while preserving the shared session context.`,
+    methodSketch: `Paper source: ${paper.title}\nSession: ${paper.sessionRoom}\nTopic: ${topic.label}\nAbstract: ${paper.abstract}\nUse the canvas to collect sticky notes focused on this paper, then compare them against adjacent papers in the same topic group. Topic signals: ${keywordText}.`,
+    novelty: [
+      `Creates a dedicated collaboration canvas for "${paper.title}" instead of mixing paper-specific notes into the broader topic canvas.`,
+      `Keeps the discussion anchored to ${paper.sessionRoom} while still linking it to ${topic.label}.`,
+      "Supports paper-level synthesis that can later feed back into the shared topic workspace.",
+    ],
+    groundingPaperIds: [paper.id],
+  };
 }
 
 function estimateThemedNoteHeight(text: string, width: number): number {

@@ -1,32 +1,15 @@
-import type { StickyNote } from "@/lib/canvas";
-import type { IdeaCard } from "@/lib/ideas";
+import { auth } from "@/lib/auth";
+import { resolveActionAuthorName } from "@/lib/auth/author";
+import { getVisibleIdeaStoreState } from "@/lib/ideas/store";
 import {
-  type CommentType,
-  type IdeaFields,
-  type IdeaVersionTrigger,
-  type ReactionKind,
-  addCommentToIdeaInState,
-  completeOnboardingInState,
-  createIdeaFromCardInState,
-  deleteIdeaInState,
-  publishIdeaInState,
-  restoreDraftVersionInState,
-  saveDraftVersionInState,
-  saveIdeaNotesInState,
-  saveTopicRecommendationCountInState,
-  toggleCommentReactionInState,
-  toggleIdeaUpvoteInState,
-} from "@/lib/ideas/store";
+  type IdeaStoreAction,
+  IdeaStoreActionSchema,
+  applyIdeaStoreAction,
+} from "@/lib/ideas/store-actions";
 import { getIdeaStoreState, mutateIdeaStoreState } from "@/server/idea-store-service";
 import { NextResponse } from "next/server";
-import { z } from "zod";
 
 export const dynamic = "force-dynamic";
-
-const ActionSchema = z.object({
-  action: z.string(),
-  payload: z.unknown().optional(),
-});
 
 function objectPayload(payload: unknown): Record<string, unknown> {
   return typeof payload === "object" && payload !== null
@@ -34,100 +17,60 @@ function objectPayload(payload: unknown): Record<string, unknown> {
     : {};
 }
 
-export async function GET() {
-  return NextResponse.json(await getIdeaStoreState());
+function requestedActionAuthorName(action: IdeaStoreAction): string | null {
+  const payload = objectPayload(action.payload);
+  switch (action.action) {
+    case "createIdeaFromCard":
+    case "addCommentToIdea":
+    case "toggleIdeaUpvote":
+    case "toggleCommentReaction":
+      return typeof payload.authorName === "string" ? payload.authorName : null;
+    case "createTopicIdeaFromCard":
+    case "deleteIdea":
+    case "deleteCommentFromIdea":
+    case "saveIdeaNotes":
+    case "publishIdea":
+    case "saveDraftVersion":
+    case "restoreDraftVersion":
+      return typeof payload.actorName === "string" ? payload.actorName : null;
+    case "completeOnboarding":
+    case "saveTopicRecommendationCount":
+    case "clearJoinedTopics":
+      return typeof payload.normalizedAuthorName === "string" ? payload.normalizedAuthorName : null;
+    default:
+      return null;
+  }
+}
+
+export async function GET(req: Request) {
+  const session = await auth();
+  const params = new URL(req.url).searchParams;
+  const viewerName = resolveActionAuthorName(session, params.get("author"));
+  return NextResponse.json(getVisibleIdeaStoreState(await getIdeaStoreState(), viewerName));
 }
 
 export async function POST(req: Request) {
-  const parsed = ActionSchema.safeParse(await req.json());
+  const session = await auth();
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "invalid_payload" }, { status: 400 });
+  }
+
+  const parsed = IdeaStoreActionSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid_payload" }, { status: 400 });
   }
 
-  const payload = objectPayload(parsed.data.payload);
-  const result = await mutateIdeaStoreState((state) => {
-    switch (parsed.data.action) {
-      case "createIdeaFromCard":
-        return createIdeaFromCardInState(
-          state,
-          payload.card as IdeaCard,
-          String(payload.authorName ?? ""),
-        );
-      case "deleteIdea":
-        return deleteIdeaInState(
-          state,
-          String(payload.ideaId ?? ""),
-          String(payload.actorName ?? ""),
-        );
-      case "saveIdeaNotes":
-        return saveIdeaNotesInState(
-          state,
-          String(payload.ideaId ?? ""),
-          (payload.notes ?? []) as StickyNote[],
-          String(payload.actorName ?? ""),
-        );
-      case "publishIdea":
-        return publishIdeaInState(
-          state,
-          String(payload.ideaId ?? ""),
-          payload.fields as IdeaFields,
-          String(payload.actorName ?? ""),
-          (payload.notes ?? undefined) as StickyNote[] | undefined,
-        );
-      case "saveDraftVersion":
-        return saveDraftVersionInState(
-          state,
-          String(payload.ideaId ?? ""),
-          payload.fields as IdeaFields,
-          (payload.notes ?? []) as StickyNote[],
-          payload.trigger as IdeaVersionTrigger,
-          String(payload.summary ?? ""),
-          String(payload.actorName ?? ""),
-        );
-      case "restoreDraftVersion":
-        return restoreDraftVersionInState(
-          state,
-          String(payload.ideaId ?? ""),
-          String(payload.versionId ?? ""),
-          String(payload.actorName ?? ""),
-        );
-      case "addCommentToIdea":
-        return addCommentToIdeaInState(state, {
-          ideaId: String(payload.ideaId ?? ""),
-          authorName: String(payload.authorName ?? ""),
-          type: payload.type as CommentType,
-          body: String(payload.body ?? ""),
-          parentCommentId: (payload.parentCommentId as string | null | undefined) ?? null,
-        });
-      case "toggleIdeaUpvote":
-        return toggleIdeaUpvoteInState(
-          state,
-          String(payload.ideaId ?? ""),
-          String(payload.authorName ?? ""),
-        );
-      case "toggleCommentReaction":
-        return toggleCommentReactionInState(
-          state,
-          String(payload.ideaId ?? ""),
-          String(payload.commentId ?? ""),
-          payload.kind as ReactionKind,
-          String(payload.authorName ?? ""),
-        );
-      case "completeOnboarding":
-        return {
-          state: completeOnboardingInState(state, String(payload.normalizedAuthorName ?? "")),
-          idea: null,
-        };
-      case "saveTopicRecommendationCount":
-        return saveTopicRecommendationCountInState(
-          state,
-          String(payload.normalizedAuthorName ?? ""),
-          Number(payload.visibleTopicCount ?? 0),
-        );
-      default:
-        return { state, idea: null };
-    }
-  });
+  const authorName = resolveActionAuthorName(session, requestedActionAuthorName(parsed.data));
+  if (!authorName) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  const result = await mutateIdeaStoreState((state) =>
+    applyIdeaStoreAction(state, parsed.data, authorName),
+  );
 
   return NextResponse.json(result);
 }

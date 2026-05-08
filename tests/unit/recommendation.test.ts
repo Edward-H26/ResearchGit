@@ -1,5 +1,11 @@
 import { getAuthorByName, getAuthors } from "@/lib/papers/catalog";
-import { recommendCollaboratorsForAuthor, recommendPapersForAuthor } from "@/lib/recommendation";
+import {
+  getCatalogTopicById,
+  getCatalogTopics,
+  recommendAdditionalTopicsForAuthor,
+  recommendPapersForAuthor,
+  recommendTopicsForAuthor,
+} from "@/lib/recommendation";
 import {
   jaccardScore,
   sharedRecommendationTokens,
@@ -71,38 +77,61 @@ describe("recommendation scoring helpers", () => {
   });
 });
 
-describe("recommendCollaboratorsForAuthor", () => {
-  it("does not recommend the author themselves", () => {
+describe("recommendTopicsForAuthor", () => {
+  it("returns topic recommendations with same-topic papers", () => {
     const author = getRequiredAuthor();
-    const recs = recommendCollaboratorsForAuthor(author.name, 5);
+    const recs = recommendTopicsForAuthor(author.name, 5);
+    expect(recs.length).toBeGreaterThan(0);
     for (const rec of recs) {
-      expect(rec.author.normalizedName).not.toBe(author.normalizedName);
-    }
-  });
-
-  it("each entry has a track and rationale", () => {
-    const author = getRequiredAuthor().name;
-    const recs = recommendCollaboratorsForAuthor(author, 4);
-    for (const rec of recs) {
-      expect(["with-you", "stretch-you"]).toContain(rec.track);
+      expect(rec.topic.papers.length).toBeGreaterThan(0);
+      expect(rec.recommendedPapers.length).toBeGreaterThan(0);
       expect(rec.rationale.length).toBeGreaterThan(0);
     }
   });
 
-  it("respects per-track limit", () => {
+  it("orders topics by descending score", () => {
     const author = getRequiredAuthor().name;
-    const recs = recommendCollaboratorsForAuthor(author, 3);
-    const withYou = recs.filter((r) => r.track === "with-you");
-    const stretch = recs.filter((r) => r.track === "stretch-you");
-    expect(withYou.length).toBeLessThanOrEqual(3);
-    expect(stretch.length).toBeLessThanOrEqual(3);
+    const recs = recommendTopicsForAuthor(author, 8);
+    for (let i = 1; i < recs.length; i++) {
+      const prev = recs[i - 1];
+      const curr = recs[i];
+      if (!prev || !curr) continue;
+      expect(prev.score).toBeGreaterThanOrEqual(curr.score);
+    }
+  });
+
+  it("can look up a recommended topic by id", () => {
+    const topic = recommendTopicsForAuthor("Yun Huang", 1)[0]?.topic;
+    expect(topic).toBeDefined();
+    if (!topic) return;
+    expect(getCatalogTopicById(topic.id)?.label).toBe(topic.label);
+  });
+
+  it("uses one session topic for a one-paper author", () => {
+    const recs = recommendTopicsForAuthor("Ziyi Zhang", 5);
+
+    expect(recs).toHaveLength(1);
+    expect(recs[0]?.topic.source).toBe("Session: P1 - Room 122");
+    expect(recs[0]?.topic.label.toLowerCase()).toBe("ai in practice");
+  });
+
+  it("generates keyword-driven additional session topics", () => {
+    const recs = recommendAdditionalTopicsForAuthor("Ziyi Zhang", "latency timing agents", 5);
+
+    expect(recs.length).toBeGreaterThan(0);
+    expect(recs.every((rec) => rec.topic.source.startsWith("Session:"))).toBe(true);
+    expect(recs.some((rec) => rec.topic.label.toLowerCase().includes("timing"))).toBe(true);
   });
 
   it("returns empty array for unknown author", () => {
-    expect(recommendCollaboratorsForAuthor("not-a-real-author-xyz", 5)).toEqual([]);
+    expect(recommendTopicsForAuthor("not-a-real-author-xyz", 5)).toEqual([]);
   });
 
   it("catalog sanity: catalog has many authors", () => {
     expect(getAuthors().length).toBeGreaterThan(50);
+  });
+
+  it("catalog sanity: catalog has many broader topics", () => {
+    expect(getCatalogTopics().length).toBeGreaterThan(20);
   });
 });
