@@ -6,7 +6,7 @@ import { CommentWorkspace } from "@/components/v2/idea-detail/CommentWorkspace";
 import { TopicPaperArea } from "@/components/v2/topic-canvas/TopicPaperArea";
 import { TopicReportPanel } from "@/components/v2/topic-canvas/TopicReportPanel";
 import { type TopicReport, buildTopicReport } from "@/components/v2/topic-canvas/report";
-import type { StickyNote } from "@/lib/canvas";
+import { type StickyNote, buildTopicStickyEnhancementContext } from "@/lib/canvas";
 import { buildTopicIdeaCard, buildTopicPaperIdeaCard } from "@/lib/ideas";
 import {
   createTopicIdeaFromCard,
@@ -14,7 +14,8 @@ import {
   saveIdeaNotes,
   subscribeToIdeaStore,
 } from "@/lib/ideas/client-store";
-import type { IdeaRecord } from "@/lib/ideas/store";
+import { withLocalIdeaNotes } from "@/lib/ideas/note-snapshots";
+import type { IdeaRecord } from "@/lib/ideas/store-types";
 import { getAuthorByName } from "@/lib/papers/catalog";
 import { getCatalogTopicById } from "@/lib/recommendation";
 import { dashboardHref, marketplaceHref } from "@/lib/routes";
@@ -42,16 +43,7 @@ export function TopicCanvasClient({ topicId, viewerName, paperId = null }: Topic
     return activePaper ? buildTopicPaperIdeaCard(topic, activePaper) : buildTopicIdeaCard(topic);
   }, [activePaper, topic]);
   const stickyEnhancementContext = useMemo(
-    () => ({
-      topicLabel: topic?.label,
-      activePaperTitle: activePaper?.title,
-      relatedPaperTitles:
-        topic?.papers
-          .filter((paper) => paper.id !== activePaper?.id)
-          .slice(0, 5)
-          .map((paper) => paper.title) ?? [],
-      sourceSummary: activePaper?.abstract,
-    }),
+    () => buildTopicStickyEnhancementContext({ topic, activePaper }),
     [activePaper, topic],
   );
   const viewerAuthor = useMemo(
@@ -132,11 +124,7 @@ export function TopicCanvasClient({ topicId, viewerName, paperId = null }: Topic
 
   function saveCanvasNotes(notes: ReadonlyArray<StickyNote>) {
     if (!activeIdea || !viewerAuthor) return;
-    setIdea((current) =>
-      current?.id === activeIdea.id
-        ? { ...current, notes: [...notes], updatedAt: new Date().toISOString() }
-        : current,
-    );
+    setIdea((current) => withLocalIdeaNotes(current, activeIdea.id, notes));
     queueNotesSave(notes);
   }
 
@@ -154,7 +142,7 @@ export function TopicCanvasClient({ topicId, viewerName, paperId = null }: Topic
         <section className="max-w-xl rounded-[28px] border border-[#f0c6b8] bg-[#fff2ee] p-6 text-[#8c3f25]">
           <h1 className="text-2xl font-semibold">Topic not found</h1>
           <p className="mt-3 text-sm leading-relaxed">
-            This CHI 2026 topic was not found in papers_by_room.json.
+            This CHI 2026 topic was not found in src/data/papers_by_room.json.
           </p>
           <Link
             href="/"

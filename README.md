@@ -2,7 +2,7 @@
 
 A research-ideation platform for CHI 2026 authors. Sign in with Google, match a CHI author record, browse authored papers, join broader topic canvases grounded in the CHI program, develop a research idea on a sticky-note canvas with AI-clustered themes, publish to a shared marketplace, gather typed comments, and continue improving the draft through saved versions.
 
-Spec: [`SPEC.md`](./SPEC.md). Current module notes: [`plans/abstract-pondering-starfish.md`](./plans/abstract-pondering-starfish.md). Archived V0/V1 specs: [`archive/`](./archive/).
+Spec: [`SPEC.md`](./SPEC.md). Current module notes: [`archive/plans/abstract-pondering-starfish.md`](./archive/plans/abstract-pondering-starfish.md). Archived V0/V1 specs: [`archive/`](./archive/).
 
 ## Stack
 
@@ -30,7 +30,7 @@ Spec: [`SPEC.md`](./SPEC.md). Current module notes: [`plans/abstract-pondering-s
    pnpm dev
    ```
 
-The CHI 2026 paper dataset (`papers_by_room.json` at the repo root) is loaded
+The CHI 2026 paper dataset (`src/data/papers_by_room.json`) is loaded
 **in-memory** at module init by `src/lib/papers/catalog.ts`. There is no Neo4j
 ingest step. Paper and Author are read-only reference data. Neo4j only stores
 dynamic per-user state (User, Idea, IdeaVersion, Sticky, Comment, and topic recommendation counts).
@@ -62,7 +62,7 @@ Key cuts from V1:
 - Removed the sticky-intent picker. V2 stickies are a single shape with resize, search, AI enhancement, and theme grouping
 - Removed the locked-report workflow. A private idea uses the same detail UI as an open idea but is restricted to the owner
 - Removed unused Liveblocks scaffolding. Current draft updates synchronize through the idea-store subscription and polling path
-- Replaced ResearchGalaxy cluster catalog with the CHI 2026 program (`papers_by_room.json`)
+- Replaced ResearchGalaxy cluster catalog with the CHI 2026 program (`src/data/papers_by_room.json`)
 
 ## Architecture map
 
@@ -84,7 +84,7 @@ Key cuts from V1:
 
 ## Recommendation algorithm
 
-`src/lib/recommendation/algorithm.md` documents the deterministic topic engine. The current app groups CHI 2026 records from `papers_by_room.json`, recommends broader same-topic canvases, and keeps idea generation, dashboard recommendations, and tests independent from external services.
+`src/lib/recommendation/algorithm.md` documents the deterministic topic engine. The current app groups CHI 2026 records from `src/data/papers_by_room.json`, recommends broader same-topic canvases, and keeps idea generation, dashboard recommendations, and tests independent from external services.
 
 ## Conventions
 

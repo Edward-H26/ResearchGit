@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const localChromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: false,
@@ -14,10 +16,9 @@ export default defineConfig({
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
-        launchOptions: {
-          executablePath:
-            "/Users/edwardhu/Library/Caches/ms-playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-        },
+        ...(localChromiumExecutablePath
+          ? { launchOptions: { executablePath: localChromiumExecutablePath } }
+          : {}),
       },
     },
   ],

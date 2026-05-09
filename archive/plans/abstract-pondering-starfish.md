@@ -8,7 +8,7 @@ This file is retained as a short historical pointer. The earlier exploratory pla
 ## Current Source Of Truth
 
 - Product requirements live in `SPEC.md`.
-- The CHI 2026 paper catalog is `papers_by_room.json` at the repository root.
+- The CHI 2026 paper catalog is `src/data/papers_by_room.json` at the repository root.
 - Catalog loading and author matching live in `src/lib/papers/catalog.ts`.
 - Topic and paper recommendations live in `src/lib/recommendation/index.ts` and are documented in `src/lib/recommendation/algorithm.md`.
 - Importable idea-store mutation validation lives in `src/lib/ideas/store-actions.ts`.

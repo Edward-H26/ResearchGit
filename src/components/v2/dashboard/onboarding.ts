@@ -32,14 +32,12 @@ export const ONBOARDING_STEPS: DashboardOnboardingStep[] = [
     next: "Selected papers unlock a more focused idea generation path.",
   },
   {
-    label: "Ideas",
-    title: "Generate a draft route",
-    body: "Use the idea workspace to turn selected papers, or all of your CHI papers, into draft research directions.",
-    location: "My idea workspace",
-    useWhen:
-      "Use selected papers for a focused draft, or all papers when you want a broader set of directions.",
-    action:
-      "Choose Generate ideas or From all my papers at CHI 2026, then open the draft card that appears.",
+    label: "Drafts",
+    title: "Generate from selected papers",
+    body: "Use the Publications section to turn selected CHI papers into a focused private draft.",
+    location: "My Publications",
+    useWhen: "Use selected papers when you want a draft grounded in specific source records.",
+    action: "Select up to five papers, then choose Generate draft.",
     next: "Draft cards lead into a private canvas where you can shape the idea before publishing.",
   },
   {
@@ -50,7 +48,7 @@ export const ONBOARDING_STEPS: DashboardOnboardingStep[] = [
     useWhen: "Use this when you want directions outside your immediate paper list.",
     action:
       "Click Generate more to search by keywords, review the generated topic cards, and pass or join them.",
-    next: "Joining a topic expands the session workspace in the same dashboard section.",
+    next: "Joining a topic turns the session card into the direct canvas entry point.",
   },
   {
     label: "Canvas",

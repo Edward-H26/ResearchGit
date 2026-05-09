@@ -4,7 +4,7 @@ import { getNeo4jConfig } from "../src/lib/neo4j/config";
 const { uri: URI, user: USER, password: PASSWORD } = getNeo4jConfig();
 
 // V2 schema per SPEC.md §6.
-// Note: Paper/Author are loaded in-memory from `papers_by_room.json` at module init
+// Note: Paper/Author are loaded in-memory from `src/data/papers_by_room.json` at module init
 // (see `src/lib/papers/catalog.ts`); they are not Neo4j nodes. Neo4j only stores
 // dynamic per-user state: User, Idea, IdeaVersion, Sticky, and Comment.
 const CONSTRAINTS: ReadonlyArray<string> = [
@@ -41,7 +41,7 @@ const V1_CLEANUPS: ReadonlyArray<{ name: string; cypher: string }> = [
   {
     name: "drop_v2_paper_nodes",
     // Paper nodes were briefly considered for Neo4j ingest. V2 went with
-    // in-memory papers from papers_by_room.json instead. Drop any leftovers.
+    // in-memory papers from src/data/papers_by_room.json instead. Drop any leftovers.
     cypher: "MATCH (p:Paper) DETACH DELETE p RETURN count(p) AS removed",
   },
   {

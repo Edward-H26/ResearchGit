@@ -2,11 +2,11 @@
 
 Status: deterministic local topic engine active
 
-The recommendation engine is fully local and uses `papers_by_room.json` as the authoritative CHI 2026 source. The app no longer depends on external recommendation services or reference-site behavior.
+The recommendation engine is fully local and uses `src/data/papers_by_room.json` as the authoritative CHI 2026 source. The app no longer depends on external recommendation services or reference-site behavior.
 
 ## Source Data
 
-The catalog loader in `src/lib/papers/catalog.ts` imports the repository root file `papers_by_room.json`. The JSON is grouped first by room. Individual paper records may also include a `domain`, which is used as a label inside that session group when it is specific.
+The catalog loader in `src/lib/papers/catalog.ts` imports `src/data/papers_by_room.json`. The JSON is grouped first by room. Individual paper records may also include a `domain`, which is used as a label inside that session group when it is specific.
 
 Topic construction uses this order:
 

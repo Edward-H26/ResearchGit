@@ -34,7 +34,7 @@
         "useImportType": "warn"
       },
       "suspicious": {
-        "noConsole": "off"
+        "noConsole": "error"
       },
       "correctness": {
         "noUnusedImports": "error",

@@ -1,6 +1,7 @@
 "use client";
 
 import { StickyNotesBoard } from "@/components/canvas";
+import { visibleThemeLabelsForNotes } from "@/components/v2/canvas-theme-labels";
 import { useDebouncedIdeaNotes } from "@/components/v2/hooks/useDebouncedIdeaNotes";
 import {
   DraftEnhanceModal,
@@ -9,11 +10,9 @@ import {
   QUICK_AI_ACTIONS,
   type QuickAiAction,
 } from "@/components/v2/idea-draft/DraftModals";
-import type { StickyNote } from "@/lib/canvas";
+import { type StickyNote, buildIdeaStickyEnhancementContext } from "@/lib/canvas";
 import {
   type DraftEnhancementPreview,
-  THEME_DISPLAY_DEFINITIONS,
-  UNGROUPED_THEME_INDEX,
   applyThemesToNotes,
   generateIdeaCards,
   previewDraftEnhancement,
@@ -29,7 +28,9 @@ import {
   saveIdeaNotes,
   subscribeToIdeaStore,
 } from "@/lib/ideas/client-store";
-import { type IdeaFields, type IdeaRecord, ideaRecordToCard } from "@/lib/ideas/store";
+import { withLocalIdeaNotes } from "@/lib/ideas/note-snapshots";
+import { ideaRecordToCard } from "@/lib/ideas/store";
+import type { IdeaFields, IdeaRecord } from "@/lib/ideas/store-types";
 import { getAuthorByName, getPaperById } from "@/lib/papers/catalog";
 import { dashboardHref, ideaHref } from "@/lib/routes";
 import Link from "next/link";
@@ -73,15 +74,7 @@ export function IdeaDraftClient({ ideaId, authorName }: IdeaDraftClientProps) {
   const [enhancementTrigger, setEnhancementTrigger] =
     useState<IdeaVersionTrigger>("ai_quick_action");
   const currentIdeaId = idea?.id ?? null;
-  const themeLabels =
-    themeLabelsVisible && idea
-      ? THEME_DISPLAY_DEFINITIONS.filter((theme) =>
-          idea.notes.some((note) => note.themeIndex === theme.index),
-        ).map((theme) => ({
-          ...theme,
-          isUngrouped: theme.index === UNGROUPED_THEME_INDEX,
-        }))
-      : [];
+  const themeLabels = themeLabelsVisible && idea ? visibleThemeLabelsForNotes(idea.notes) : [];
   const draftPaperContext = useMemo(
     () =>
       idea
@@ -92,10 +85,7 @@ export function IdeaDraftClient({ ideaId, authorName }: IdeaDraftClientProps) {
     [idea],
   );
   const stickyEnhancementContext = useMemo(
-    () => ({
-      relatedPaperTitles: draftPaperContext.map((paper) => paper.title),
-      sourceSummary: idea ? [idea.hypothesis, idea.methodology].join("\n") : undefined,
-    }),
+    () => buildIdeaStickyEnhancementContext({ idea, papers: draftPaperContext }),
     [draftPaperContext, idea],
   );
   const applyUpdatedNotes = useCallback((updated: IdeaRecord) => {
@@ -184,11 +174,7 @@ export function IdeaDraftClient({ ideaId, authorName }: IdeaDraftClientProps) {
   const saveNotes = useCallback(
     (notes: ReadonlyArray<StickyNote>) => {
       if (!currentIdeaId) return;
-      setIdea((current) =>
-        current?.id === currentIdeaId
-          ? { ...current, notes: [...notes], updatedAt: new Date().toISOString() }
-          : current,
-      );
+      setIdea((current) => withLocalIdeaNotes(current, currentIdeaId, notes));
       queueNotesSave(notes);
     },
     [currentIdeaId, queueNotesSave],

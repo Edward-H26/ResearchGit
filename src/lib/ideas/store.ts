@@ -9,89 +9,41 @@ import {
   parseTopicIdeaCardId,
   synthesizeIdeaFromNotes,
 } from "@/lib/ideas";
+import {
+  COMMENT_TYPES,
+  type CommentType,
+  type IdeaCommentRecord,
+  type IdeaFields,
+  type IdeaMutationResult,
+  type IdeaRecord,
+  type IdeaStatus,
+  type IdeaStoreState,
+  type IdeaVersion,
+  type IdeaVersionTrigger,
+  REACTION_KINDS,
+  type ReactionKind,
+  type ReactionMap,
+  STORE_VERSION,
+} from "@/lib/ideas/store-types";
 import { getAuthorByName } from "@/lib/papers/catalog";
 import { getCatalogTopicById } from "@/lib/recommendation";
 
-export const STORE_VERSION = 8;
 const CATALOG_MARKETPLACE_AUTHOR_NAMES = ["Yun Huang", "Yiren Liu", "Hyanghee Park"] as const;
 const STICKY_NOTE_VERSION_SOURCES = ["manual", "ai_enhancement", "restore"] as const;
 
-export const COMMENT_TYPES = [
-  "general",
-  "method_critique",
-  "related_work",
-  "experiment_idea",
-  "concern",
-] as const;
-
-export const REACTION_KINDS = ["👍", "👎", "🎯", "💡", "⚠️", "❓"] as const;
-
-export type IdeaStatus = "draft" | "open" | "locked";
-export type CommentType = (typeof COMMENT_TYPES)[number];
-export type ReactionKind = (typeof REACTION_KINDS)[number];
-export type ReactionMap = Record<ReactionKind, string[]>;
-export type IdeaVersionTrigger =
-  | "manual"
-  | "ai_quick_action"
-  | "ai_custom_prompt"
-  | "ai_iteration"
-  | "manual_restore";
-
-export type IdeaFields = {
-  title: string;
-  hypothesis: string;
-  methodology: string;
-  novelty: string[];
-  citations: string[];
-};
-
-export type IdeaCommentRecord = {
-  id: string;
-  ideaId: string;
-  authorName: string;
-  type: CommentType;
-  body: string;
-  parentCommentId: string | null;
-  reactions: ReactionMap;
-  createdAt: string;
-  editedAt: string | null;
-};
-
-export type IdeaVersion = {
-  id: string;
-  ord: number;
-  trigger: IdeaVersionTrigger;
-  summary: string;
-  fields: IdeaFields;
-  notes: StickyNote[];
-  createdAt: string;
-};
-
-export type IdeaRecord = IdeaFields & {
-  id: string;
-  cardId: string;
-  ownerName: string;
-  status: IdeaStatus;
-  groundingPaperIds: string[];
-  notes: StickyNote[];
-  comments: IdeaCommentRecord[];
-  versions: IdeaVersion[];
-  upvotedBy: string[];
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type IdeaStoreState = {
-  version: number;
-  ideas: IdeaRecord[];
-  onboardingCompleteByAuthor: Record<string, boolean>;
-  topicRecommendationCountByAuthor: Record<string, number>;
-  joinedTopicIdsByAuthor: Record<string, string[]>;
-};
-
-export type IdeaMutationResult = {
-  state: IdeaStoreState;
-  idea: IdeaRecord | null;
+export { COMMENT_TYPES, REACTION_KINDS, STORE_VERSION };
+export type {
+  CommentType,
+  IdeaCommentRecord,
+  IdeaFields,
+  IdeaMutationResult,
+  IdeaRecord,
+  IdeaStatus,
+  IdeaStoreState,
+  IdeaVersion,
+  IdeaVersionTrigger,
+  ReactionKind,
+  ReactionMap,
 };
 
 function slugify(value: string): string {

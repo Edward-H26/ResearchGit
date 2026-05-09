@@ -14,6 +14,7 @@
     "exactOptionalPropertyTypes": true,
     "noEmit": true,
     "incremental": true,
+    "tsBuildInfoFile": ".tsbuildinfo/app.tsbuildinfo",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,

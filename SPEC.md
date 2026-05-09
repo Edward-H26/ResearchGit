@@ -5,14 +5,14 @@ Last updated: 2026-05-07
 Supersedes: `archive/SPECv0.md`, `archive/SPECv1.md`
 
 Implementation note: the current repo ships a deterministic, testable V2 prototype for the full
-phase flow using `papers_by_room.json` directly. External services remain wired for later
+phase flow using `src/data/papers_by_room.json` directly. External services remain wired for later
 integration, but local routes and tests no longer depend on the deleted `public/catalog` assets.
 
 ---
 
 ## 1. Context
 
-ResearchGit V2 is a research-ideation platform for CHI 2026 authors. A user signs in with Google, resolves their identity against the CHI 2026 paper list in `papers_by_room.json`, receives broader topic recommendations, enters shared topic canvases, develops private idea drafts when needed, gathers structured comments, iterates with AI, and can keep final work private to the owner.
+ResearchGit V2 is a research-ideation platform for CHI 2026 authors. A user signs in with Google, resolves their identity against the CHI 2026 paper list in `src/data/papers_by_room.json`, receives broader topic recommendations, enters shared topic canvases, develops private idea drafts when needed, gathers structured comments, iterates with AI, and can keep final work private to the owner.
 
 V2 replaces both earlier directions:
 
@@ -21,10 +21,10 @@ V2 replaces both earlier directions:
 
 V2 keeps the stronger parts of each:
 
-- Workflow and lifecycle come from `research-idea-platform-spec.md`.
+- Workflow and lifecycle come from `archive/research-idea-platform-spec.md`.
 - Visual language and canvas feel come from the Atomic Ideation prototype.
 
-The authoritative dataset is `papers_by_room.json`, which contains the CHI 2026 program and serves as both the paper database and the author lookup source.
+The authoritative dataset is `src/data/papers_by_room.json`, which contains the CHI 2026 program and serves as both the paper database and the author lookup source.
 
 ---
 
@@ -33,7 +33,7 @@ The authoritative dataset is `papers_by_room.json`, which contains the CHI 2026 
 ### 2.1 In scope
 
 - Google OAuth sign-in.
-- CHI-author name disambiguation against `papers_by_room.json`.
+- CHI-author name disambiguation against `src/data/papers_by_room.json`.
 - Dashboard with authored papers, broader topic recommendations, marketplace access, and the user's ideas.
 - AI idea generation from selected papers or full publication history.
 - Owner-author sticky-note draft canvas with store-synchronized updates across same-author sessions.
@@ -61,7 +61,7 @@ The authoritative dataset is `papers_by_room.json`, which contains the CHI 2026 
 ## 3. Locked Decisions
 
 1. Workflow supports private per-idea drafts and public broader-topic canvases.
-2. The authoritative paper source is `papers_by_room.json`.
+2. The authoritative paper source is `src/data/papers_by_room.json`.
 3. Login is Google OAuth followed by author-name matching.
 4. Users with no CHI 2026 author match are blocked from onboarding.
 5. One pasted thought creates one sticky. There is no AI atomization step.
@@ -72,7 +72,7 @@ The authoritative dataset is `papers_by_room.json`, which contains the CHI 2026 
 10. Theme clustering is user-triggered and produces at most 3 themes.
 11. Publishing synthesizes structured idea fields from the stickies and cluster labels.
 12. Private ideas use the same detail UI as open ideas, but access is restricted to the owner-author.
-13. Recommendation behavior is local and topic-based over `papers_by_room.json`.
+13. Recommendation behavior is local and topic-based over `src/data/papers_by_room.json`.
 14. The stack remains Next.js 16, TypeScript strict mode, Neo4j, and Auth.js v5. Current live updates use idea-store broadcasts, storage events, focus refresh, and polling.
 
 ---
@@ -94,7 +94,7 @@ The authoritative dataset is `papers_by_room.json`, which contains the CHI 2026 
 
 - User signs in with Google.
 - User enters their name.
-- The system matches the name against the unique author set in `papers_by_room.json`.
+- The system matches the name against the unique author set in `src/data/papers_by_room.json`.
 - If multiple matches exist, the user chooses from a disambiguation modal showing candidate names and example papers.
 - If no match exists, onboarding stops with retry and contact-admin paths.
 
@@ -188,7 +188,7 @@ Next.js 16 App Router
         |     - publish synthesis
         |     - idea iteration
         |
-        +--> papers_by_room.json
+        +--> src/data/papers_by_room.json
               - CHI 2026 source catalog
               - topic grouping and recommendation source
 ```
@@ -198,7 +198,7 @@ Next.js 16 App Router
 ## 6. Data Model
 
 > **Architecture note (V2):** `Paper` and `Author` are NOT Neo4j nodes. They
-> are loaded in-memory from `papers_by_room.json` at module init by
+> are loaded in-memory from `src/data/papers_by_room.json` at module init by
 > `src/lib/papers/catalog.ts`. The CHI 2026 program is read-only reference
 > data; storing it in Neo4j adds operational cost (ingest step, sync drift)
 > with no graph-traversal benefit. Neo4j stores only the dynamic per-user
@@ -350,7 +350,7 @@ src/components/
 
 ## 8. Recommendation Engine
 
-Recommendation quality is central to V2. The repository documents the deterministic topic engine in `src/lib/recommendation/algorithm.md` and builds recommendations directly from `papers_by_room.json`.
+Recommendation quality is central to V2. The repository documents the deterministic topic engine in `src/lib/recommendation/algorithm.md` and builds recommendations directly from `src/data/papers_by_room.json`.
 
 The local portable engine provides:
 
@@ -464,6 +464,6 @@ The following pieces stay and are reused:
 ## 13. Risks and Fallbacks
 
 - If the CHI 2026 catalog changes, keep the local deterministic recommendation engine stable and update `src/lib/recommendation/algorithm.md` with the new grouping behavior.
-- If author names in `papers_by_room.json` are inconsistent, the lookup layer must normalize case, punctuation, and diacritics and support disambiguation.
+- If author names in `src/data/papers_by_room.json` are inconsistent, the lookup layer must normalize case, punctuation, and diacritics and support disambiguation.
 - If AI synthesis from stickies is poor, the publish modal remains editable before the idea can be opened.
 - If users outside CHI 2026 expect access, the product intentionally blocks them in V2.

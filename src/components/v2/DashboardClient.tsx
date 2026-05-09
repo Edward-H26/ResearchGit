@@ -3,11 +3,11 @@
 import {
   AuthorRequiredFallback,
   DashboardHero,
-  IdeaWorkspaceSection,
   OnboardingDialog,
   PublicationsSection,
   TopicRecommendationsSection,
 } from "@/components/v2/dashboard/DashboardSections";
+import { dashboardIdeasFromState, ideasSignature } from "@/components/v2/dashboard/activity";
 import {
   FIRST_ONBOARDING_STEP,
   ONBOARDING_STEPS,
@@ -17,23 +17,22 @@ import {
 import {
   INITIAL_TOPIC_COUNT,
   MAX_TOPIC_RECOMMENDATIONS,
+  mergeTopicRecommendations,
+  topicRecommendationsFromIds,
   visibleRecommendedTopics,
 } from "@/components/v2/dashboard/topics";
-import { TOPIC_IDEA_CARD_PREFIX, buildTopicIdeaCard } from "@/lib/ideas";
+import { buildTopicIdeaCard } from "@/lib/ideas";
 import {
   type IdeaRecord,
-  type IdeaStoreState,
   completeOnboarding as completeOnboardingForAuthor,
   createTopicIdeaFromCard,
   loadIdeaStoreState,
   subscribeToIdeaStore,
 } from "@/lib/ideas/client-store";
-import { getIdeasForAuthorFromState } from "@/lib/ideas/store";
 import { getAuthorByName } from "@/lib/papers/catalog";
 import {
   type RecommendedTopic,
   recommendAdditionalTopicsForAuthor,
-  recommendTopicByIdForAuthor,
   recommendTopicsForAuthor,
 } from "@/lib/recommendation";
 import { dashboardHref, ideaGenerationHref } from "@/lib/routes";
@@ -46,41 +45,6 @@ type DashboardClientProps = {
   showOnboarding: boolean;
   shouldPersistOnboarding: boolean;
 };
-
-function ideasSignature(ideas: ReadonlyArray<IdeaRecord>): string {
-  return ideas
-    .map(
-      (idea) =>
-        `${idea.id}:${idea.status}:${idea.updatedAt}:${idea.notes.length}:${idea.comments.length}`,
-    )
-    .join("|");
-}
-
-function mergeTopicRecommendations(
-  primaryTopics: ReadonlyArray<RecommendedTopic>,
-  generatedTopics: ReadonlyArray<RecommendedTopic>,
-): RecommendedTopic[] {
-  const seen = new Set<string>();
-  return [...primaryTopics, ...generatedTopics].filter((recommendation) => {
-    if (seen.has(recommendation.topic.id)) return false;
-    seen.add(recommendation.topic.id);
-    return true;
-  });
-}
-
-function topicIdeaFromState(storeState: IdeaStoreState, topicId: string): IdeaRecord | null {
-  const cardId = `${TOPIC_IDEA_CARD_PREFIX}${topicId}`;
-  return storeState.ideas.find((idea) => idea.cardId === cardId) ?? null;
-}
-
-function topicRecommendationsFromIds(
-  authorName: string,
-  topicIds: ReadonlyArray<string>,
-): RecommendedTopic[] {
-  return topicIds
-    .map((topicId) => recommendTopicByIdForAuthor(authorName, topicId))
-    .filter((recommendation): recommendation is RecommendedTopic => recommendation !== null);
-}
 
 export function DashboardClient({
   authorName,
@@ -107,8 +71,6 @@ export function DashboardClient({
   const [selectedGeneratedTopicIds, setSelectedGeneratedTopicIds] = useState<string[]>([]);
   const [isTopicReviewOpen, setTopicReviewOpen] = useState(false);
   const [joinedTopicIds, setJoinedTopicIds] = useState<string[]>([]);
-  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
-  const [activeTopicIdea, setActiveTopicIdea] = useState<IdeaRecord | null>(null);
 
   const authoredPapers = useMemo(() => author?.papers.slice(0, 8) ?? [], [author]);
   const authoredRecommendedTopics = useMemo(
@@ -153,9 +115,7 @@ export function DashboardClient({
       try {
         const storeState = await loadIdeaStoreState();
         if (canceled) return;
-        const currentIdeas = getIdeasForAuthorFromState(storeState, author.name).sort((a, b) =>
-          b.updatedAt.localeCompare(a.updatedAt),
-        );
+        const currentIdeas = dashboardIdeasFromState(storeState, author.name);
         const savedTopicCount =
           storeState.topicRecommendationCountByAuthor[author.normalizedName] ?? INITIAL_TOPIC_COUNT;
         const savedJoinedTopicIds = storeState.joinedTopicIdsByAuthor[author.normalizedName] ?? [];
@@ -175,10 +135,6 @@ export function DashboardClient({
             authoredRecommendedTopics.length + savedJoinedTopicIds.length,
           ),
         );
-        const nextSelectedTopicId =
-          selectedTopicId && savedJoinedTopicIds.includes(selectedTopicId)
-            ? selectedTopicId
-            : (savedJoinedTopicIds[0] ?? null);
         setIdeas((current) =>
           ideasSignature(current) === ideasSignature(currentIdeas) ? current : currentIdeas,
         );
@@ -187,10 +143,6 @@ export function DashboardClient({
         );
         setVisibleTopicCount((current) =>
           current === nextVisibleTopicCount ? current : nextVisibleTopicCount,
-        );
-        setSelectedTopicId(nextSelectedTopicId);
-        setActiveTopicIdea(
-          nextSelectedTopicId ? topicIdeaFromState(storeState, nextSelectedTopicId) : null,
         );
       } catch {
         if (!canceled) {
@@ -206,14 +158,7 @@ export function DashboardClient({
       canceled = true;
       unsubscribe();
     };
-  }, [
-    author,
-    authoredRecommendedTopics,
-    dismissedOnboardingAuthor,
-    onboardingKey,
-    selectedTopicId,
-    showOnboarding,
-  ]);
+  }, [author, authoredRecommendedTopics, dismissedOnboardingAuthor, onboardingKey, showOnboarding]);
 
   useEffect(() => {
     if (!authorNormalizedName) {
@@ -229,8 +174,6 @@ export function DashboardClient({
     setTopicKeywordQuery("");
     setTopicSearchOpen(false);
     setJoinedTopicIds([]);
-    setSelectedTopicId(null);
-    setActiveTopicIdea(null);
   }, [authorNormalizedName]);
 
   if (!author) {
@@ -264,7 +207,7 @@ export function DashboardClient({
 
   async function joinTopics(topicIds: ReadonlyArray<string>) {
     const uniqueTopicIds = [...new Set(topicIds)];
-    let firstJoinedTopic: { topicId: string; idea: IdeaRecord } | null = null;
+    let firstJoinedTopicId: string | null = null;
 
     for (const topicId of uniqueTopicIds) {
       const recommendation = findTopicRecommendation(topicId);
@@ -274,10 +217,11 @@ export function DashboardClient({
         currentAuthor.name,
       );
       if (!created) continue;
-      firstJoinedTopic ??= { topicId, idea: created };
+      firstJoinedTopicId ??= topicId;
     }
 
-    if (!firstJoinedTopic) return;
+    if (!firstJoinedTopicId) return;
+    const targetTopicId = firstJoinedTopicId;
 
     setJoinedTopicIds((current) => {
       const next = [...current];
@@ -292,10 +236,8 @@ export function DashboardClient({
         authoredRecommendedTopics.length + joinedTopicIds.length + uniqueTopicIds.length,
       ),
     );
-    setSelectedTopicId(firstJoinedTopic.topicId);
-    setActiveTopicIdea(firstJoinedTopic.idea);
     window.setTimeout(() => {
-      document.getElementById(`topic-card-${firstJoinedTopic.topicId}`)?.scrollIntoView({
+      document.getElementById(`topic-card-${targetTopicId}`)?.scrollIntoView({
         behavior: "smooth",
         block: "start",
       });
@@ -385,18 +327,13 @@ export function DashboardClient({
           papers={authoredPapers}
           selectedPaperIds={selectedPaperIds}
           onTogglePaper={togglePaper}
-        />
-        <IdeaWorkspaceSection
-          authorName={currentAuthor.name}
-          ideas={ideas}
-          selectedPaperCount={selectedPaperIds.length}
           onGenerateSelected={generateSelected}
         />
         <TopicRecommendationsSection
           currentAuthor={currentAuthor}
+          ideas={ideas}
           recommendedTopics={recommendedTopics}
-          selectedTopicId={selectedTopicId}
-          activeTopicIdea={activeTopicIdea}
+          joinedTopicIds={joinedTopicIds}
           topicKeywordQuery={topicKeywordQuery}
           isTopicSearchOpen={isTopicSearchOpen}
           isGeneratingTopics={isGeneratingTopics}

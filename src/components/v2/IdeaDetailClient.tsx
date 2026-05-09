@@ -1,17 +1,19 @@
 "use client";
 
 import { StickyNotesBoard } from "@/components/canvas";
+import { visibleThemeLabelsForNotes } from "@/components/v2/canvas-theme-labels";
 import { useDebouncedIdeaNotes } from "@/components/v2/hooks/useDebouncedIdeaNotes";
 import { CommentWorkspace } from "@/components/v2/idea-detail/CommentWorkspace";
-import type { StickyNote } from "@/lib/canvas";
-import { THEME_DISPLAY_DEFINITIONS, UNGROUPED_THEME_INDEX } from "@/lib/ideas";
+import { type StickyNote, buildIdeaStickyEnhancementContext } from "@/lib/canvas";
 import {
   getIdeaById,
   saveIdeaNotes,
   subscribeToIdeaStore,
   toggleIdeaUpvote,
 } from "@/lib/ideas/client-store";
-import { type IdeaRecord, isTopicCanvasIdea } from "@/lib/ideas/store";
+import { withLocalIdeaNotes } from "@/lib/ideas/note-snapshots";
+import { isTopicCanvasIdea } from "@/lib/ideas/store";
+import type { IdeaRecord } from "@/lib/ideas/store-types";
 import { getAuthorByName, getPaperById } from "@/lib/papers/catalog";
 import { marketplaceHref } from "@/lib/routes";
 import Link from "next/link";
@@ -74,15 +76,7 @@ export function IdeaDetailClient({ ideaId, viewerName }: IdeaDetailClientProps) 
   const isTopicCanvas = idea ? isTopicCanvasIdea(idea) : false;
   const isPrivateIdea = idea?.status === "locked";
   const canvasThemeLabels = useMemo(
-    () =>
-      idea
-        ? THEME_DISPLAY_DEFINITIONS.filter((theme) =>
-            idea.notes.some((note) => note.themeIndex === theme.index),
-          ).map((theme) => ({
-            ...theme,
-            isUngrouped: theme.index === UNGROUPED_THEME_INDEX,
-          }))
-        : [],
+    () => (idea ? visibleThemeLabelsForNotes(idea.notes) : []),
     [idea],
   );
   const canvasPaperContext = useMemo(() => {
@@ -92,11 +86,12 @@ export function IdeaDetailClient({ ideaId, viewerName }: IdeaDetailClientProps) 
       .filter((paper) => paper !== null);
   }, [idea]);
   const stickyEnhancementContext = useMemo(
-    () => ({
-      topicLabel: isTopicCanvas ? idea?.title : undefined,
-      relatedPaperTitles: canvasPaperContext.map((paper) => paper.title),
-      sourceSummary: idea ? [idea.hypothesis, idea.methodology].join("\n") : undefined,
-    }),
+    () =>
+      buildIdeaStickyEnhancementContext({
+        idea,
+        papers: canvasPaperContext,
+        topicLabel: isTopicCanvas ? idea?.title : undefined,
+      }),
     [canvasPaperContext, idea, isTopicCanvas],
   );
 
@@ -110,11 +105,7 @@ export function IdeaDetailClient({ ideaId, viewerName }: IdeaDetailClientProps) 
   const saveCanvasNotes = useCallback(
     async (notes: ReadonlyArray<StickyNote>) => {
       if (!currentIdeaId) return;
-      setIdea((current) =>
-        current?.id === currentIdeaId
-          ? { ...current, notes: [...notes], updatedAt: new Date().toISOString() }
-          : current,
-      );
+      setIdea((current) => withLocalIdeaNotes(current, currentIdeaId, notes));
       queueNotesSave(notes);
     },
     [currentIdeaId, queueNotesSave],

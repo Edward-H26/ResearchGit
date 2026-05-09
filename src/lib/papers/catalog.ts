@@ -1,4 +1,4 @@
-import rawPapersByRoom from "../../../papers_by_room.json";
+import rawPapersByRoom from "../../data/papers_by_room.json";
 
 type RawPaper = {
   title: string;

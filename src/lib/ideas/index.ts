@@ -195,7 +195,7 @@ export function buildTopicIdeaCard(topic: CatalogTopic): IdeaCard {
     methodSketch: `Topic source: ${topic.source}\nShared anchor: ${paperCount} CHI 2026 paper(s)\nTopic signals: ${keywordText}\nUse the canvas to collect asynchronous sticky notes, then synthesize directions and next steps from the accumulated discussion.`,
     novelty: [
       `Turns the CHI 2026 topic group "${topic.label}" into a shared public workspace rather than a single-paper draft.`,
-      `Keeps discussion grounded in ${paperCount} same-topic paper record(s) from papers_by_room.json.`,
+      `Keeps discussion grounded in ${paperCount} same-topic paper record(s) from src/data/papers_by_room.json.`,
       "Supports community-level synthesis from sticky notes, paper anchors, and comments.",
     ],
     groundingPaperIds: topic.papers.map((paper) => paper.id),

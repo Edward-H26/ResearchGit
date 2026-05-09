@@ -1,14 +1,11 @@
 "use client";
 
-import {
-  STICKY_NOTE_ENHANCEMENT_OPTIONS,
-  type StickyNoteEnhancementContext,
-  type StickyNoteEnhancementInput,
-  type StickyNoteEnhancementOptionId,
+import type {
+  StickyNoteEnhancementContext,
+  StickyNoteEnhancementOptionId,
 } from "@/lib/canvas/ai-enhance";
-import { appendStickyNoteVersion } from "@/lib/canvas/board-utils";
 import { BOARD_HEIGHT, BOARD_WIDTH } from "@/lib/canvas/constants";
-import type { StickyNote, StickyNoteVersion } from "@/lib/canvas/schema";
+import type { StickyNote } from "@/lib/canvas/schema";
 import { stickyBgClass } from "@/lib/canvas/theme-styles";
 import type { CanvasUser, ResizeCorner } from "@/lib/canvas/types";
 import { cn } from "@/lib/utils";
@@ -21,7 +18,15 @@ import {
   useRef,
   useState,
 } from "react";
+import { StickyEnhancementDialog } from "./StickyEnhancementDialog";
 import { Icon } from "./icons";
+import {
+  type StickyEnhancementRequest,
+  buildStickyEnhancementContext,
+  requestStickyNoteEnhancement,
+  withAppliedEnhancementVersion,
+  withRestoredStickyVersion,
+} from "./sticky-enhancement";
 import { useStickyBoard } from "./useStickyBoard";
 
 export type StickyThemeLabel = {
@@ -57,88 +62,6 @@ export type StickyNotesBoardProps = {
   onChange?: (notes: ReadonlyArray<StickyNote>) => void;
   readOnly?: boolean;
 };
-
-type StickyEnhancementRequest = {
-  key: string;
-  input: StickyNoteEnhancementInput;
-} | null;
-
-async function requestStickyNoteEnhancement(
-  actorName: string,
-  input: StickyNoteEnhancementInput,
-): Promise<string> {
-  const response = await fetch("/api/canvas/enhance-sticky", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ actorName, ...input }),
-  });
-  if (!response.ok) throw new Error("sticky_enhancement_failed");
-  const result = (await response.json()) as { text?: string };
-  if (!result.text) throw new Error("sticky_enhancement_empty");
-  return result.text;
-}
-
-function stickyEnhancementOptionLabel(optionId: StickyNoteEnhancementOptionId): string {
-  return (
-    STICKY_NOTE_ENHANCEMENT_OPTIONS.find((option) => option.id === optionId)?.label ??
-    STICKY_NOTE_ENHANCEMENT_OPTIONS[0].label
-  );
-}
-
-function compactContextText(value: string | undefined, maxLength: number): string | undefined {
-  const compacted = value?.trim().replace(/\s+/g, " ").slice(0, maxLength);
-  return compacted || undefined;
-}
-
-function compactContextList(
-  values: ReadonlyArray<string> | undefined,
-  limit: number,
-  maxLength: number,
-): string[] {
-  return (values ?? [])
-    .map((value) => compactContextText(value, maxLength))
-    .filter((value) => value !== undefined)
-    .slice(0, limit);
-}
-
-function withAppliedEnhancementVersion(
-  note: StickyNote,
-  enhancedText: string,
-  optionId: StickyNoteEnhancementOptionId,
-  authorHandle: string,
-): StickyNote {
-  const currentVersions = note.versions ?? [];
-  const currentText = note.text.trim();
-  const lastVersionText = currentVersions.at(-1)?.text.trim();
-  const baselineNote =
-    currentText && lastVersionText !== currentText
-      ? appendStickyNoteVersion(note, {
-          text: note.text,
-          label: "Before AI enhancement",
-          source: "manual",
-          authorHandle,
-        })
-      : note;
-  return appendStickyNoteVersion(baselineNote, {
-    text: enhancedText,
-    label: `AI enhancement: ${stickyEnhancementOptionLabel(optionId)}`,
-    source: "ai_enhancement",
-    authorHandle,
-  });
-}
-
-function withRestoredStickyVersion(
-  note: StickyNote,
-  version: StickyNoteVersion,
-  authorHandle: string,
-): StickyNote {
-  return appendStickyNoteVersion(note, {
-    text: version.text,
-    label: `Restored ${version.label}`,
-    source: "restore",
-    authorHandle,
-  });
-}
 
 export function StickyNotesBoard({
   currentUser,
@@ -212,33 +135,14 @@ export function StickyNotesBoard({
   }, []);
 
   const stickyEnhancementContext = useMemo<StickyNoteEnhancementContext>(() => {
-    const customContext = enhancementContext ?? {};
-    const boardOtherNotes = board.notes
-      .filter((note) => note.id !== enhancingNoteId && note.text.trim())
-      .slice(0, 6)
-      .map((note) => note.text.trim());
-    return {
-      boardTitle:
-        compactContextText(customContext.boardTitle ?? boardTitle, 200) ?? "ResearchGit canvas",
-      boardSubtitle: compactContextText(customContext.boardSubtitle ?? boardSubtitle, 240),
-      topicLabel: compactContextText(customContext.topicLabel, 200),
-      activePaperTitle: compactContextText(customContext.activePaperTitle, 300),
-      relatedPaperTitles: compactContextList(customContext.relatedPaperTitles, 8, 300),
-      sourceSummary: compactContextText(customContext.sourceSummary, 2500),
-      themeLabels: compactContextList(
-        [
-          ...(customContext.themeLabels ?? []),
-          ...themeLabels.map((theme) => theme.compactLabel ?? theme.label),
-        ],
-        8,
-        120,
-      ),
-      otherNotes: compactContextList(
-        [...(customContext.otherNotes ?? []), ...boardOtherNotes],
-        8,
-        600,
-      ),
-    };
+    return buildStickyEnhancementContext({
+      boardNotes: board.notes,
+      boardSubtitle,
+      boardTitle,
+      enhancingNoteId,
+      enhancementContext,
+      themeLabels,
+    });
   }, [board.notes, boardSubtitle, boardTitle, enhancingNoteId, enhancementContext, themeLabels]);
   const enhancementRequest = useMemo<StickyEnhancementRequest>(() => {
     if (!enhancingNote) return null;
@@ -594,145 +498,38 @@ export function StickyNotesBoard({
       </div>
 
       {enhancingNote ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4 sm:p-5">
-          <section className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-[28px] bg-white p-5 text-neutral-950 shadow-[0_24px_100px_rgba(0,0,0,0.24)] sm:p-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-neutral-500">
-              Sticky AI assistant
-            </p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
-              Enhance sticky note
-            </h2>
-            <div className="mt-5 grid gap-5 lg:grid-cols-[0.78fr_1.22fr]">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-                  Configuration
-                </p>
-                <div className="mt-3 grid gap-2">
-                  {STICKY_NOTE_ENHANCEMENT_OPTIONS.map((option) => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => setEnhancementOptionId(option.id)}
-                      className={cn(
-                        "rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition",
-                        enhancementOptionId === option.id
-                          ? "border-neutral-950 bg-neutral-950 text-white"
-                          : "border-neutral-200 bg-white text-neutral-800 hover:border-neutral-950",
-                      )}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-4">
-                <div className="rounded-[24px] border border-neutral-200 bg-[#fcfbf8] p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-                    Preview
-                  </p>
-                  <div className="mt-3 rounded-[20px] bg-white p-4 text-sm leading-relaxed text-neutral-800">
-                    {isGeneratingEnhancement ? (
-                      <p className="text-neutral-500">Generating with ChatGPT...</p>
-                    ) : enhancementError ? (
-                      <p className="text-[#8c3f25]">{enhancementError}</p>
-                    ) : (
-                      <p className="whitespace-pre-wrap">{enhancementPreviewText}</p>
-                    )}
-                  </div>
-                </div>
-                <div className="rounded-[24px] border border-neutral-200 bg-white p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-                      Sticky versions
-                    </p>
-                    <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-semibold text-neutral-500">
-                      {(enhancingNote.versions ?? []).length}
-                    </span>
-                  </div>
-                  <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
-                    {(enhancingNote.versions ?? []).length === 0 ? (
-                      <p className="rounded-[18px] bg-neutral-50 p-3 text-sm leading-relaxed text-neutral-500">
-                        No saved sticky versions yet. Applying an AI enhancement will save the
-                        current note and the accepted rewrite here.
-                      </p>
-                    ) : (
-                      [...(enhancingNote.versions ?? [])].reverse().map((version) => (
-                        <article
-                          key={version.id}
-                          className="rounded-[18px] border border-neutral-200 p-3 text-sm"
-                        >
-                          <div className="flex flex-wrap items-start justify-between gap-2">
-                            <div>
-                              <p className="font-semibold text-neutral-900">{version.label}</p>
-                              <p className="mt-1 text-xs capitalize text-neutral-500">
-                                {version.source.replaceAll("_", " ")} by {version.authorHandle}
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const restored = withRestoredStickyVersion(
-                                  enhancingNote,
-                                  version,
-                                  currentUser.handle,
-                                );
-                                board.patchNote(
-                                  enhancingNote.id,
-                                  { text: version.text, versions: restored.versions },
-                                  "sticky.text_edited",
-                                );
-                                setEnhancementPreviewText(version.text);
-                              }}
-                              className="rounded-full border border-neutral-300 px-3 py-1 text-xs font-semibold text-neutral-800 transition hover:border-neutral-950"
-                            >
-                              Restore
-                            </button>
-                          </div>
-                          <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-neutral-600">
-                            {version.text}
-                          </p>
-                          <p className="mt-2 text-[11px] text-neutral-400">
-                            {new Date(version.createdAt).toLocaleString()}
-                          </p>
-                        </article>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="mt-6 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  const enhancedNote = withAppliedEnhancementVersion(
-                    enhancingNote,
-                    enhancementPreviewText,
-                    enhancementOptionId,
-                    currentUser.handle,
-                  );
-                  board.patchNote(
-                    enhancingNote.id,
-                    { text: enhancementPreviewText, versions: enhancedNote.versions },
-                    "sticky.text_edited",
-                  );
-                  setEnhancingNoteId(null);
-                }}
-                disabled={isGeneratingEnhancement || !enhancementPreviewText}
-                className="rounded-full bg-neutral-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800 disabled:bg-neutral-300"
-              >
-                Apply to sticky
-              </button>
-              <button
-                type="button"
-                onClick={() => setEnhancingNoteId(null)}
-                className="rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-semibold text-neutral-800 transition hover:border-neutral-950"
-              >
-                Cancel
-              </button>
-            </div>
-          </section>
-        </div>
+        <StickyEnhancementDialog
+          note={enhancingNote}
+          enhancementOptionId={enhancementOptionId}
+          enhancementPreviewText={enhancementPreviewText}
+          enhancementError={enhancementError}
+          isGeneratingEnhancement={isGeneratingEnhancement}
+          onOptionChange={setEnhancementOptionId}
+          onApply={() => {
+            const enhancedNote = withAppliedEnhancementVersion(
+              enhancingNote,
+              enhancementPreviewText,
+              enhancementOptionId,
+              currentUser.handle,
+            );
+            board.patchNote(
+              enhancingNote.id,
+              { text: enhancementPreviewText, versions: enhancedNote.versions },
+              "sticky.text_edited",
+            );
+            setEnhancingNoteId(null);
+          }}
+          onCancel={() => setEnhancingNoteId(null)}
+          onRestoreVersion={(version) => {
+            const restored = withRestoredStickyVersion(enhancingNote, version, currentUser.handle);
+            board.patchNote(
+              enhancingNote.id,
+              { text: version.text, versions: restored.versions },
+              "sticky.text_edited",
+            );
+            setEnhancementPreviewText(version.text);
+          }}
+        />
       ) : null}
     </div>
   );

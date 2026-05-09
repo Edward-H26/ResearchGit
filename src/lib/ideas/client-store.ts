@@ -3,18 +3,20 @@
 import type { StickyNote } from "@/lib/canvas";
 import type { IdeaCard } from "@/lib/ideas";
 import {
-  type CommentType,
-  type IdeaFields,
-  type IdeaMutationResult,
-  type IdeaRecord,
-  type IdeaStoreState,
-  type IdeaVersionTrigger,
-  type ReactionKind,
   dedupeIdeasByOwnerAndCard,
   getAllIdeasFromState,
   getIdeaByIdFromState,
   getIdeasForAuthorFromState,
 } from "@/lib/ideas/store";
+import type {
+  CommentType,
+  IdeaFields,
+  IdeaMutationResult,
+  IdeaRecord,
+  IdeaStoreState,
+  IdeaVersionTrigger,
+  ReactionKind,
+} from "@/lib/ideas/store-types";
 
 export type {
   CommentType,

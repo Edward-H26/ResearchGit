@@ -286,7 +286,7 @@ test.describe("v2 author workflow", () => {
     const tutorialSteps = [
       "Match your CHI identity",
       "Scan your CHI papers",
-      "Generate a draft route",
+      "Generate from selected papers",
       "Explore broader sessions",
       "Join a shared topic canvas",
       "Build with sticky notes",
@@ -378,44 +378,33 @@ test.describe("v2 author workflow", () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test("dashboard idea workspace adapts to tablet widths", async ({ page }) => {
+  test("dashboard actions stay colocated at tablet widths", async ({ page }) => {
     await page.setViewportSize({ width: 866, height: 717 });
     await page.goto("/dashboard?author=Ziyi%20Zhang");
     await dismissTutorialIfPresent(page);
-    const workspace = page.locator("[data-idea-actions]");
-    await expect(workspace).toBeVisible();
+    await expect(page.locator("[data-idea-actions]")).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "My idea workspace" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Generate draft" })).toBeDisabled();
+    const topicSection = page.locator("[data-topic-section]");
+    await expect(topicSection.getByRole("button", { name: "Generate more topics" })).toBeVisible();
+    await expect(topicSection.getByRole("link", { name: "Marketplace" })).toBeVisible();
     await expectNoHorizontalOverflow(page);
-    const workspaceBox = await workspace.boundingBox();
-    const summaryBoxes = await workspace
-      .locator("[data-idea-summary-stat]")
-      .evaluateAll((elements) =>
-        elements.map((element) => {
-          const rect = element.getBoundingClientRect();
-          return { top: rect.top };
-        }),
-      );
-    const actionBoxes = await workspace.locator("a, button").evaluateAll((elements) =>
+    const topicSectionBox = await topicSection.boundingBox();
+    const actionBoxes = await topicSection.locator("a, button").evaluateAll((elements) =>
       elements.map((element) => {
         const rect = element.getBoundingClientRect();
         return { left: rect.left, right: rect.right };
       }),
     );
-    expect(workspaceBox).not.toBeNull();
-    if (!workspaceBox) throw new Error("idea workspace was not measurable");
-    expect(summaryBoxes).toHaveLength(3);
-    expect(Math.max(...summaryBoxes.map((box) => box.top))).toBeLessThanOrEqual(
-      Math.min(...summaryBoxes.map((box) => box.top)) + 2,
-    );
-    await expect(
-      workspace.getByRole("link", { name: "From all my papers at CHI 2026" }),
-    ).toBeVisible();
+    expect(topicSectionBox).not.toBeNull();
+    if (!topicSectionBox) throw new Error("topic section was not measurable");
     for (const box of actionBoxes) {
-      expect(box.left).toBeGreaterThanOrEqual(workspaceBox.x - 1);
-      expect(box.right).toBeLessThanOrEqual(workspaceBox.x + workspaceBox.width + 1);
+      expect(box.left).toBeGreaterThanOrEqual(topicSectionBox.x - 1);
+      expect(box.right).toBeLessThanOrEqual(topicSectionBox.x + topicSectionBox.width + 1);
     }
   });
 
-  test("broader topic cards open an inline dashboard workspace", async ({ page }) => {
+  test("broader topic cards expose one canvas entry point", async ({ page }) => {
     await page.goto("/dashboard?author=Yun%20Huang");
     await dismissTutorialIfPresent(page);
     await expect(page.getByRole("heading", { name: "Broader topics" })).toBeVisible();
@@ -427,19 +416,23 @@ test.describe("v2 author workflow", () => {
     await firstTopic.getByRole("button", { name: "Join topic" }).click();
 
     await expect(page).toHaveURL(dashboardUrl);
-    await expect(firstTopic.getByRole("button", { name: "Joined" })).toHaveCount(0);
     await expect(firstTopic.getByRole("button", { name: "Join topic" })).toHaveCount(0);
-    const inlineWorkspace = firstTopic.locator("[data-inline-topic-workspace]");
-    await expect(inlineWorkspace).toBeVisible();
-    await expect(inlineWorkspace.getByRole("heading", { name: topicTitle })).toBeVisible();
-    await expect(inlineWorkspace.getByText("Session paper browser")).toBeVisible();
-    await expect(inlineWorkspace.getByRole("link", { name: "Open paper" })).toHaveCount(0);
-    await inlineWorkspace.getByRole("button", { name: /session paper browser/i }).click();
-    await expect(inlineWorkspace.getByRole("heading", { name: "Comment composer" })).toHaveCount(0);
-    await expect(inlineWorkspace.getByRole("heading", { name: "Comment threads" })).toHaveCount(0);
-    await expect(inlineWorkspace.getByRole("link", { name: "Program record" })).toHaveCount(0);
-    const firstPaperRow = inlineWorkspace.locator("[data-topic-paper-row]").first();
-    const firstPaperTitle = await firstPaperRow.locator("h5").innerText();
+    await expect(firstTopic.locator("[data-inline-topic-workspace]")).toHaveCount(0);
+    await expect(firstTopic.getByText("Session paper browser")).toHaveCount(0);
+    await expect(firstTopic.getByRole("link", { name: "Open canvas" })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(firstTopic.getByText("Open", { exact: true })).toBeVisible();
+    await expect(firstTopic.getByText("Joined", { exact: true })).toBeVisible();
+    await expect(firstTopic.getByText(/\d+ note\(s\)/)).toBeVisible();
+    await expect(firstTopic.getByText(/\d+ comment\(s\)/)).toBeVisible();
+    await firstTopic.getByRole("link", { name: "Open canvas" }).click();
+    await expect(page).toHaveURL(/\/topics\/[^/]+\?author=/);
+    await expect(page.getByRole("heading", { name: topicTitle })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Sticky note area" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Same-topic CHI 2026 papers" })).toBeVisible();
+    const firstPaperRow = page.locator("[data-topic-paper-row]").first();
+    const firstPaperTitle = await firstPaperRow.locator("h3").innerText();
     await firstPaperRow.getByRole("link", { name: "Open paper" }).click();
     await expect(page).toHaveURL(/\/topics\/[^/]+\/papers\//);
     await expect(
@@ -777,18 +770,18 @@ test.describe("v2 author workflow", () => {
     await dismissTutorialIfPresent(page);
     const authorHeading = page.getByRole("heading", { name: "Yun Huang" });
     const publicationsHeading = page.getByRole("heading", { name: "My Publications" });
-    const ideasLabel = page.getByRole("heading", { name: "My idea workspace" });
+    const topicsHeading = page.getByRole("heading", { name: "Broader topics" });
     const authorBox = await authorHeading.boundingBox();
     const publicationsBox = await publicationsHeading.boundingBox();
-    const ideasBox = await ideasLabel.boundingBox();
+    const topicsBox = await topicsHeading.boundingBox();
     expect(authorBox).not.toBeNull();
     expect(publicationsBox).not.toBeNull();
-    expect(ideasBox).not.toBeNull();
-    if (!authorBox || !publicationsBox || !ideasBox) {
+    expect(topicsBox).not.toBeNull();
+    if (!authorBox || !publicationsBox || !topicsBox) {
       throw new Error("dashboard section ordering was not measurable");
     }
     expect(authorBox.y + authorBox.height).toBeLessThan(publicationsBox.y);
-    expect(publicationsBox.y).toBeLessThan(ideasBox.y);
+    expect(publicationsBox.y).toBeLessThan(topicsBox.y);
 
     await expect(page.getByRole("heading", { name: "Broader topics" })).toBeVisible();
     await dismissTutorialIfPresent(page);
