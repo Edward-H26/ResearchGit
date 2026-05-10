@@ -100,7 +100,7 @@ export function TopicRecommendationsSection({
           </form>
           <Link
             href={marketplaceHref(currentAuthor.name)}
-            className="inline-flex justify-center rounded-full border border-neutral-300 bg-white px-4 py-2 text-sm font-semibold text-neutral-800 transition hover:border-neutral-950"
+            className="inline-flex justify-center rounded-full border border-[#f4e6c5] bg-[#f4e6c5] px-4 py-2 text-sm font-semibold text-[#6f5210] transition hover:border-[#e6d2a8] hover:bg-[#ecd9af]"
           >
             Marketplace
           </Link>
